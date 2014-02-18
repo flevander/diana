@@ -1,0 +1,52 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import time
+from dianaLib import *
+
+if 'DIANA_DIR' not in os.environ:
+	print "'DIANA_DIR' environmental variable not set, exiting"
+	exit(1)
+
+dianaDir = os.environ['DIANA_DIR']
+
+usage = """
+> diana-consolidate SWATH_LIST_FILE outName
+"""
+
+if len(sys.argv) < 3:
+	print usage
+	exit(1)
+else:	
+	swathListFile 	= sys.argv[-2]
+	outName			= sys.argv[-1]
+
+swathFiles = []
+if swathListFile.lower().endswith("wiff") or swathListFile.lower().endswith("raw"):
+	swathFiles.append(swathListFile)
+else:
+	swathFiles = readList(swathListFile)
+
+bases = [ base(x) for x in swathFiles ]
+
+
+first = True
+outPath = "%s.csv" % outName
+out = open(outPath, "w")
+
+for x in bases:
+	resultPath = "%s/%s_all_targets_peakgroups.xls" % (x, x)
+	f = open(resultPath, "r")
+	headers = f.readline()
+	cols = headers.split()
+	if first:
+		out.write("file\t%s\tmProphet_d_score\tmProphet_q_value\n" % '\t'.join(cols[:-2]))
+		first = False
+	
+	for line in f:
+		out.write("%s\t%s" % (x, line))
+	
+	f.close()
+
+out.close()

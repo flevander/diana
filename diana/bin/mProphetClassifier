@@ -1,0 +1,120 @@
+#!/usr/bin/python
+
+import subprocess
+import sys
+from pandas import *
+import scipy.stats
+from dianaLib import *
+
+
+
+def calcIRtProb(df, irtKs):
+	irtProb = lambda x:(1-scipy.stats.norm.cdf(abs(x)))*2
+	df['measuredIRT'] = irtKs["intercept"] + df['rtApex']*irtKs["slope"]
+	df['irtDev'] = df['rtApexAssay'] - df['measuredIRT']
+	irtStat = df['irtDev'] / irtKs["std"]
+	df['irtProb'] = irtStat.apply(irtProb)
+
+
+
+
+def setupDF(df, isDecoy, pCutoff=0.99):
+	df 		= df.fillna(1.0)
+	fcs 	= df.fragmentCorrScore
+	fcs[fcs > 1.0] = 1.0
+	fcs[fcs < -1.0] = -1.0
+	df['inArea']		= np.log(df.area + 1.0) * 10.0 # because mProphet LDA complains
+	df['var_inRt'] 		= df.irtProb * 100 # because mProphet LDA complains
+	df['var_irtAbsDev'] = -df.irtDev.abs()
+	df['var_logRt'] 	= np.log(df.irtProb + 0.0000000001)
+	df['main_var_logFMPRP'] 	= np.log(df.fragmentMarkovPcsRatioProb + 0.0000000001)
+	df['main_var_inFMPRP'] 		= 1.0 - df.fragmentMarkovPcsRatioProb
+	df['var_inFCS'] 	= df.fragmentCorrScore
+	df['var_logIMPRP'] 	= np.log(df.isotopeMarkovPcsRatioProb + 0.0000000001)
+	df['var_inIMPRP'] 	= 1.0 - df.isotopeMarkovPcsRatioProb
+	df['var_inICS'] 	= df.isotopeCorrScore
+	df['var_inAbsRt'] 	= df.rtApex / 200
+	df['decoy']			= isDecoy
+	df['transition_group_record'] = df['protein'] + '|' + df['peptideSequence'] + '|' + df['q1'].apply(str)
+#	df['logArea'] = df['logArea'] - df['logArea'].mean()) / df['logArea'].std()
+	return df
+
+
+
+
+def setup(irtFile):
+	real 	= read_csv(realFile, sep="\t")
+	decoy 	= read_csv(decoyFile, sep="\t")
+	
+	irtKs = {}
+	irt = open(irtFile, 'r')
+	for line in irt:
+		if ':' in line:
+			t = line.split(":")
+			irtKs[t[0].strip()] = float(t[1].strip())
+	
+	print "slope: ", 	float(irtKs["slope"])
+	print "icept: ", 	float(irtKs["intercept"])
+	print "std: ", 		float(irtKs["std"] )
+	
+	calcIRtProb(real, irtKs)
+	calcIRtProb(decoy, irtKs)
+	
+	return setupDF(real, False), setupDF(decoy, True)
+
+
+
+
+
+if len(sys.argv) < 4:
+	print "mProphetClassifier target.csv decoy.csv swathfile.irtmap"
+	exit(1)
+
+if len(sys.argv) > 4:
+	dryrun = sys.argv[1] == "-d"
+else:
+	dryrun = False
+
+realFile 	= sys.argv[-3]
+decoyFile 	= sys.argv[-2]
+irtMap		= sys.argv[-1]
+
+if dryrun:
+	print "realFile:", realFile
+	print "decoyFile:", decoyFile
+	print "irtMap:", irtMap
+
+real, decoy = setup(irtMap)
+merged 		= concat([real, decoy], ignore_index=True)
+mProphIn	= to(realFile, "to.mProph.csv")
+project 	= base(realFile)
+
+if dryrun:
+	print real
+
+merged.to_csv(
+	mProphIn, 
+	index=False, 
+	sep='\t',
+	cols=['transition_group_record', 'decoy', 
+			'main_var_inFMPRP', 'var_irtAbsDev', 'var_inFCS', 'var_inIMPRP', 'var_inICS', 
+			'rtApex', 'q1', 'charge', 'peptideSequence', 'area']
+	)
+
+args = 	"--slave --args bin_dir=%s/bin/mProphet/ data_file=%s " % (dianaDir, mProphIn)
+args += "workflow=LABEL_FREE num_xval=5 run_log=FALSE write_classifier=1 "
+args += "write_all_pg=0 help=0 project=%s < %s/bin/mProphet/mProphet.R" % (project, dianaDir)
+
+if dryrun:
+	print "    DEBUG      "
+	print "   =======     "
+	print " wanted to run:"
+	print "R", args
+else:
+	os.system("R " + args)
+	
+	mProphOutFile = "%s_raw_stat.xls" % withoutExt(realFile)
+	dianaRun("csv2esv", "-f %s" % mProphOutFile, False)
+	dianaRun("esv", "clean %s.esv %s_q0.01.esv 'qvalue < 0.01'" % (mProphOutFile, mProphOutFile), False)
+
+																	

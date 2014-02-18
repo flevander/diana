@@ -1,0 +1,366 @@
+#!/usr/bin/python
+
+import os
+import sys
+import time
+from datetime import datetime
+from dianaDir import *
+from dianaLib import *
+
+
+usage = """
+> diana [OPTIONS] CONF SWATH_LIST_FILE TARGET_ASSAY_LIST DECOY_ASSAY_LIST IRT_ASSAYS
+
+CONF:
+a configuration file were each row has a key-value pair separated by a '=' char. 
+Whitespaces are ignored.
+
+SWATH_LIST_FILE:
+file that lists the swath raw data files that are supposed to be analyzed. Each
+row contains the absolute path to one .raw or .wiff file that is to be analyzed.
+
+TARGET_ASSAY_LIST / DECOY_ASSAY_LIST:
+file that lists target/decoy assay sets to be analyzed. Each row contains the absolute 
+path to one .traml assay file. Each of these will be searched on every file in the 
+SWATH_LIST_FILE. As a special case, if the file is of type .traml this file will be 
+used directly as a 1 file list. If there are more target assay files than decoys, 
+the decoys will be recycled. If there are more decoys assays files, only the first 
+will be used.
+
+IRT_ASSAYS:
+traml assay file for the peptides to be used for iRT retention time normalization. 
+
+OPTIONS:
+	-d                      do dryrun
+	--diana-dir=DIRECTORY   were diana folder is
+"""
+
+confPath 		= None
+swathListFile 	= None
+targetAssayList = None
+decoyAssayList 	= None
+irtAssayFile	= None
+conf 			= {}
+dryrun			= False
+onlyClassify	= False
+dianaRunID		= datetime.now().strftime("%Y-%m-%d-%H_%M_%S") + "-DIANA_RUN"
+analysisStartTime 	= time.time()
+
+def readArgs(args):
+	if len(args) == 5:
+		global confPath
+		global swathListFile
+		global targetAssayList
+		global decoyAssayList
+		global irtAssayFile
+		confPath 		= args[-5]
+		swathListFile 	= args[-4]
+		targetAssayList = args[-3]
+		decoyAssayList 	= args[-2]
+		irtAssayFile 	= args[-1]
+	elif args[0] == "-d":
+		global dryrun
+		dryrun = True
+		readArgs(args[1:])
+	elif args[0].lower().startswith("--diana-dir="):
+		readArgs(args[1:])
+		
+
+if len(sys.argv) < 6:
+	print usage
+	exit(1)
+else:	
+	readArgs(sys.argv[1:])
+
+
+
+
+def printMajor(title):
+	print
+	print "   ", title #
+	print "   ", "="*len(title)
+printMajor("DIANA ANALYSIS")
+print 
+	
+
+
+# READ INPUTS
+conf 					= readConf(confPath)
+deleteIntermediaryData 	= default(conf, "DeleteIntermediaryData", "False").lower() == "true"
+onlyClassify			= default(conf, "OnlyClassify", "False").lower() == "true"
+doMsConvert				= default(conf, "DoMSConvert", "True").lower() == "true"
+
+swathFiles = []
+slfl = swathListFile.lower()
+if (slfl.endswith("wiff") or slfl.endswith("raw") or 
+	slfl.endswith("mzml") or slfl.endswith("mzml.gz")):
+	swathFiles.append(swathListFile)
+else:
+	swathFiles = readList(swathListFile)
+
+targetAssays = []
+if targetAssayList.lower().endswith("traml"):
+	targetAssays.append(targetAssayList)
+else:
+	targetAssays = readList(targetAssayList)
+
+decoyAssays = []
+if decoyAssayList.lower().endswith("traml"):
+	decoyAssays.append(decoyAssayList)
+else:
+	decoyAssays = readList(decoyAssayList)
+	
+
+
+##################################################
+#	TODO: validate input before starting 
+##################################################
+
+
+if doMsConvert:
+	msconvertConfPath 	= "%s/bin/conf/msconvert.conf" % dianaDir
+	msconvertConf 		= readConf(msconvertConfPath)
+	vmName 				= require(msconvertConf, 'WindowsVBoxName')
+
+	returnCode, stdout, stderr 	= simpleExe("VBoxManage list runningvms", False)
+
+	if vmName not in stdout and not onlyClassify:
+		print "  Virtual machine with name '%s' appears not to be running. Fix this. Exiting..." % vmName
+		exit(101)
+
+
+
+
+
+
+class LogFile:
+	
+	def __init__(self, header):
+		self.data = [header]
+		
+	def log(self, row):
+		self.data.append(row)
+	
+	def toFile(self, path):
+		f = open("%s/%s" % (analysisDir, path), "w")
+		for line in self.data:
+			f.write("%s\n" % ('\t'.join(line)))
+		f.close()
+
+
+# MAIN LOOP
+analysisDir 	= require(conf, 'AnalysisDir')
+numIsotopes 	= default(conf, 'NumIsotopes', '0')
+decoys 			= decoyAssays[0]
+sectionLog 		= LogFile(["dianaRunID", "file", "section", "sectionTime", "fileElapsedTime", "dryrun"])
+fileAnalysisLog = LogFile(["dianaRunID", "file", "fileElapsedTime", "lastSection", "dryrun"])
+pyProphetConf	= require(conf, "PyProphetConf")
+
+
+
+
+
+
+class FileAnalysis:
+	
+	
+	
+	def __init__(self, swathFile):
+		self.swathFile = swathFile
+		self.fileStartTime = time.time()
+		self.fileBase = base(swathFile)
+		self.fileDir = "%s/%s" % (analysisDir, self.fileBase)
+		self.irtMap	= "%s/%s.irtmap" % (self.fileDir, self.fileBase)
+		try:
+			os.mkdir(self.fileDir)
+		except:
+			pass
+	
+	
+	
+	
+	def section(self, name):
+		self.currentSection 	= name
+		self.sectionStartTime 	= time.time()
+		print
+		print "  " + name
+		print "  " + "-" * len(name), "elapsed time: %.3fs" % (self.sectionStartTime - self.fileStartTime)
+		print
+	
+	
+	
+	def dianaRun(self, cmd, args, dryrun = True):
+		return execute(dianaBin(cmd), args, dryrun) == 0
+	
+	
+	
+	def score(self, assays):
+		if onlyClassify:
+			return True
+		assayBase = base(assays)
+		chroms = "%s/%s.chrom.mzML" % (self.fileDir, assayBase)
+		result = "%s/%s" % (self.fileDir, assayBase)
+		cmd = "--no-xml --isotopes=%s --output=%s %s %s" % (
+				numIsotopes, result, chroms, assays)
+		return self.dianaRun("diana-score", cmd, dryrun)
+	
+	
+	
+	def extractAndScore(self, assayLists):
+		if onlyClassify:
+			return True
+		
+		cmdArgs = "--ms-resolution=%s --mode=%s --isotopes=%s --out-dir=%s %s " % ( 
+				require(conf, 'ExtractResolution'), require(conf, 'ExtractMode'), 
+				numIsotopes, self.fileDir, self.mzMLpath)
+		cmd = " ".join( assayLists )
+		if not self.dianaRun("diana-extract", cmdArgs + cmd, dryrun):
+			return False
+		
+		for assays in assayLists:
+			assayBase = base(assays)
+			chroms = "%s/%s.chrom.mzML" % (self.fileDir, assayBase)
+			result = "%s/%s" % (self.fileDir, assayBase)
+			cmd = "--no-xml --isotopes=%s --output=%s %s %s" % (
+					numIsotopes, result, chroms, assays)
+			if not self.dianaRun("diana-score", cmd, dryrun):
+				return False
+		
+		return True
+		
+	
+	
+	
+	def logSectionStats(self):
+		sectionLog.log([								\
+			dianaRunID, 								\
+			self.swathFile,								\
+			self.currentSection, 						\
+			str(time.time() - self.sectionStartTime), 	\
+			str(time.time() - self.fileStartTime),		\
+			str(dryrun)									\
+			])
+	
+	
+	
+	def wrapUpFile(self, analysisCompleted = False):
+		fileAnalysisLog.log([							\
+				dianaRunID,								\
+				self.swathFile,							\
+				str(time.time() - self.fileStartTime),	\
+				self.currentSection,					\
+				str(dryrun)								\
+			])
+		if not analysisCompleted:
+			printMajor("#%&8! ANALYSIS FAILED IN SECTION " + self.currentSection)
+		
+		if deleteIntermediaryData and not onlyClassify:
+			cmd = "rm -r %s/*mzML %s/*.ibd" % (self.fileDir, self.fileDir)
+			if dryrun:
+				print cmd
+			else:
+				os.system(cmd)
+	
+	
+	
+	def run(self):
+		printMajor("ANALYZING FILE %s" % self.fileBase)
+		
+		# msconvert
+		self.section("MSCONVERT")
+		if doMsConvert:
+			cmd = "-z -n --outdir %s --outfile %s '%s'" % (self.fileDir, self.fileBase, self.swathFile)
+			if not onlyClassify and not self.dianaRun("msconvert", cmd, dryrun):
+				return self.wrapUpFile()
+			
+			self.mzMLpath = "%s/%s.mzML " % (self.fileDir, self.fileBase)
+			self.logSectionStats()
+		elif not self.swathFile.lower().endswith("mzml.gz") and not self.swathFile.lower().endswith("mzml.gz"):
+			print "can't analyze non-mzML file '%s' without using mzconvert!" % self.swathFile
+			return self.wrapUpFile()
+		else:
+			self.mzMLpath = self.swathFile
+		
+		# EXTRACT AND SCORE
+		self.section("CHROMATOGRAM EXTRACT AND SCORE")
+		if not self.extractAndScore([targetAssays[0], decoys, irtAssayFile]):
+			return self.wrapUpFile()
+		
+		for assays in targetAssays[1:]:
+			if not self.extractAndScore([assays]):
+				return self.wrapUpFile()
+		
+		self.logSectionStats()
+		
+		# SCORING
+	#	self.section("CHROMATOGRAM SCORING")
+	#	if not self.score(decoys):
+	#		return self.wrapUpFile()
+	#	
+	#	if not self.score(irtAssayFile):
+	#		return self.wrapUpFile()
+	#	
+	#	allTargets = "%s/%s_all_targets.esv" % (self.fileDir, self.fileBase)
+	#	for targets in targetAssays:
+	#		scoreOk = self.score(targets)
+	#		if not scoreOk:
+	#			break
+		
+	#	if not scoreOk:
+	#		return self.wrapUpFile()
+		
+		allTargets = "%s/%s_all_targets.esv" % (self.fileDir, self.fileBase)
+		cmd = "concat --out=%s " % allTargets
+		cmd += " ".join([ "%s/%s.esv" % (self.fileDir, base(x)) for x in targetAssays ])
+		if not onlyClassify and not self.dianaRun("esv", cmd, dryrun):
+			return self.wrapUpFile()
+		
+		self.logSectionStats()
+		
+		# CONVERT TO CSV
+		self.section("CONVERT TO CSV")
+		if not onlyClassify and not self.dianaRun("esv2csv", "%s" 	% to(allTargets, "esv"), dryrun):
+			return self.wrapUpFile()
+		
+		if not onlyClassify and not self.dianaRun("esv2csv", "%s/%s" % (self.fileDir, to(decoys, "esv")), dryrun):
+			return self.wrapUpFile()
+		
+		if not onlyClassify and not self.dianaRun("esv2csv", "%s/%s" % (self.fileDir, to(irtAssayFile, "esv")), dryrun):
+			return self.wrapUpFile()
+		
+		allTargetsCsv 	= to(allTargets, "csv")
+		decoysCsv		= "%s/%s" % (self.fileDir, to(decoys, "csv"))
+		irtAssayCsv		= "%s/%s" % (self.fileDir, to(irtAssayFile, "csv"))
+		
+		
+		# CALC IRT MAP
+		if not onlyClassify and not self.dianaRun("irtMap.py", "%s %s %s" % (irtAssayCsv, decoysCsv, self.irtMap), dryrun):
+			return self.wrapUpFile()
+		self.logSectionStats()
+		
+		# RUN CLASSIFIER
+		self.section("CLASSIFY")
+		if not self.dianaRun("pyProphetClassifier", "%s %s %s %s" % (pyProphetConf, allTargetsCsv, decoysCsv, self.irtMap), dryrun) :
+			return self.wrapUpFile()
+		self.logSectionStats()
+		
+		# finish
+		self.section("DONE")
+		self.wrapUpFile(True)	
+
+
+
+
+
+for swathFile in swathFiles:
+	fa = FileAnalysis(swathFile)
+	fa.run()
+	
+	
+		
+
+sectionLog.toFile(dianaRunID + ".section.csv")
+fileAnalysisLog.toFile(dianaRunID + ".file.csv")
+print "   total analysis time: %.3fs" % (time.time() - analysisStartTime)
+
+

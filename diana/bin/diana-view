@@ -1,0 +1,2 @@
+#!/bin/bash 
+java -jar /mnt/africa/code/swath_workspace/DianaView/target/DianaView-0.2.0-jar-with-dependencies.jar $@

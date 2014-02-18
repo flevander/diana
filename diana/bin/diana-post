@@ -1,0 +1,2 @@
+#!/bin/bash 
+java -jar /mnt/africa/code/swath_workspace/DianaPostAnalysis/target/DianaPostAnalysis-0.1.0-jar-with-dependencies.jar $@

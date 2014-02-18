@@ -1,0 +1,120 @@
+#!/usr/bin/python
+
+import subprocess
+import sys
+from pandas import *
+import scipy.stats
+from dianaLib import *
+
+
+
+def calcIRtProb(df, irtKs):
+	irtProb = lambda x:(1-scipy.stats.norm.cdf(abs(x)))*2
+	df['measuredIRT'] = irtKs["intercept"] + df['rtApex']*irtKs["slope"]
+	df['irtDev'] = df['rtApexAssay'] - df['measuredIRT']
+	irtStat = df['irtDev'] / irtKs["std"]
+	df['irtProb'] = irtStat.apply(irtProb)
+
+
+
+
+def setupDF(df, label):
+	df 		= df.fillna(1.0)
+	fcs 	= df.fragmentCorrScore
+	fcs[fcs > 1.0] = 1.0
+	fcs[fcs < -1.0] = -1.0
+	df['f_logArea']		= np.log(df.area + 1.0) 
+	df['f_irtProb'] 	= df.irtProb
+	df['f_irtAbsDev'] 	= df.irtDev.abs()
+	df['f_irtLogProb'] 	= np.log(df.irtProb + 0.0000000001)
+	df['f_logFMPRP'] 	= np.log(df.fragmentMarkovPcsRatioProb + 0.0000000001)
+	df['f_FMPRP'] 		= 1.0 - df.fragmentMarkovPcsRatioProb
+	df['f_FCS'] 		= df.fragmentCorrScore
+	df['f_logIMPRP'] 	= np.log(df.isotopeMarkovPcsRatioProb + 0.0000000001)
+	df['f_IMPRP'] 		= 1.0 - df.isotopeMarkovPcsRatioProb
+	df['f_ICS'] 		= df.isotopeCorrScore
+	df['label']			= label
+	df['peptide'] 		= 'X.' + df['peptideSequence'] + '.X'
+	df['id'] 			= df.index
+	df['transition_group_id'] = df['peptideSequence'] + '|' + df['q1'].apply(str)
+	return df
+
+
+
+
+def setup(irtFile):
+	real 	= read_csv(realFile, sep="\t")
+	decoy 	= read_csv(decoyFile, sep="\t")
+	
+	irtKs = {}
+	irt = open(irtFile, 'r')
+	for line in irt:
+		if ':' in line:
+			t = line.split(":")
+			irtKs[t[0].strip()] = float(t[1].strip())
+	
+	print " slope: ", 	float(irtKs["slope"])
+	print " icept: ", 	float(irtKs["intercept"])
+	print "   std: ", 	float(irtKs["std"] )
+	
+	calcIRtProb(real, irtKs)
+	calcIRtProb(decoy, irtKs)
+	
+	return setupDF(real, 1), setupDF(decoy, -1)
+
+
+
+
+
+if len(sys.argv) < 4:
+	print "percolatorClassifier target.csv decoy.csv swathfile.irtmap"
+	exit(1)
+
+if len(sys.argv) > 4:
+	dryrun = sys.argv[1] == "-d"
+else:
+	dryrun = False
+
+realFile 	= sys.argv[-3]
+decoyFile 	= sys.argv[-2]
+irtMap		= sys.argv[-1]
+
+if dryrun:
+	print "  realFile:", realFile
+	print " decoyFile:", decoyFile
+	print "    irtMap:", irtMap
+
+real, decoy 	= setup(irtMap)
+merged 			= concat([real, decoy], ignore_index=True)
+project 		= base(realFile)
+
+percolatorBin 	= "/usr/bin/percolator"
+percolatorIn	= to(realFile, "perc.csv")
+percolatorOut	= to(realFile, "perc.out.csv")
+
+
+if dryrun:
+	print real
+
+merged.to_csv(
+	percolatorIn, 
+	sep='\t',
+	index=False,
+	cols=['id', 'label', 
+			'f_FMPRP', 'f_irtAbsDev', 'f_FCS', 'f_IMPRP', 'f_ICS', 
+			'peptide',
+			'protein']
+	)
+
+args = 	"-j %s -r %s" % (percolatorIn, percolatorOut)
+
+if dryrun:
+	print "    DEBUG      "
+	print "   =======     "
+	print " wanted to run:"
+	print percolatorBin, args
+else:
+	os.system(percolatorBin + " " + args)
+
+
+																	

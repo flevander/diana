@@ -1,0 +1,60 @@
+#!/usr/bin/python
+
+import sys
+
+def printUsage():
+	print """usage:
+csv2esv CSV_FILE
+"""
+
+csvFile 	= None
+headers 	= ["description"]
+nArgs 		= len(sys.argv)
+force		= False
+if nArgs < 2:
+	printUsage()
+	exit(1)
+else:
+	csvFile = sys.argv[-1]
+	if sys.argv[-2] == "-f":
+		force = True
+	
+ext = csvFile.split('.')[-1].lower()
+if ext == "csv" or ext == "tsv":
+	base = ".".join(csvFile.split('.')[:-1])
+elif force:
+	base = csvFile
+else:
+	print "Unknown extension '.%s'! Rerun w. -f if the command was correct." % ext 
+outFile = base+".esv"
+
+
+def writeEsvHeader(out, sep, nCols, origin, headers):
+	out.write("""# EXTENDED SEPARATED VALUES
+#    separator: '%s'
+#       escape: '"'
+#  num columns: %d
+#
+# ORIGIN
+#         source program: csv2esv
+#
+# PARAMETERS
+# original file: %s
+#
+# COLUMN HEADERS
+#: %s""" % (sep, nCols, origin, headers))
+
+
+
+csv = open(csvFile, 'r')
+headers = csv.readline()
+sep = '\t'
+if headers.count(',') > headers.count('\t'):
+	sep = ','
+
+out = open(outFile, 'w')
+writeEsvHeader(out, sep, len(headers.split(sep)), csvFile, headers)
+for line in csv:
+	out.write(line)
+csv.close()
+out.close()

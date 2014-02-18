@@ -1,0 +1,59 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import time
+from dianaLib import *
+
+
+# VARS
+confPath 	= "%s/bin/conf/msconvert.conf" % dianaDir
+conf 		= {}
+pathMap 	= []
+
+
+
+
+# CONF READING
+conf = readConf(confPath)
+
+if 'PathMap' in conf:
+	kvs = conf['PathMap'].split(',')
+	for kv in kvs:
+		t = kv.split('->')
+		pair = (t[0].strip(), t[1].strip())
+		pathMap.append(pair)
+
+
+
+# MSCONVERT COMMAND CONSTRUCTION
+# 	- it seems like the msconvert path needs to be on C: for it to be found.
+#	- don't use --wait-stdout --wait-stderr, see ticked #11189
+args = "guestcontrol %s" % require(conf, 'WindowsVBoxName')
+args += """ exec --image "%s" """ % require(conf, 'WindowsMSConvertPath')
+args += "--username %s --passwordfile %s --wait-exit" % (
+			require(conf, 'WindowsUsername'), 
+			require(conf, 'WindowsPasswordFile')
+		)
+
+
+
+# FILE PATH CONVERSION
+def toWindows(path):
+	for key, value in pathMap:
+		if path.startswith(key):
+			return (value + path[len(key):]).replace('/', '\\\\')
+	return path.replace('/', '\\\\')
+
+if len(sys.argv) > 1:
+	asWindowsPaths = [toWindows(path) for path in sys.argv[1:]]
+	args += " -- " + " ".join(asWindowsPaths)
+else:
+	args += " --wait-stdout --wait-stderr 2>&1 | head -n 43"
+
+
+# RUNNING
+before = time.time()
+execute("VBoxManage", args, False)
+print "time taken: %.1f s" % (time.time() - before)
+
