@@ -14,6 +14,7 @@ import java.io.BufferedWriter
 import java.io.IOException
 import java.util.Properties
 import java.util.Date
+import java.util.Locale
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -234,6 +235,14 @@ object DianaScorer extends CLIApplication {
     	val name 		= properties.getProperty("pom.name")
     	val version 	= properties.getProperty("pom.version")
     	
+	/*
+	val f = new java.text.DecimalFormatSymbols(Locale.getDefault())
+	println("java dec sep: "+f.getDecimalSeparator)
+	println("scala float format:   %.3f %.3f".format(0.029, 23000.0))
+	println("scala science format: %.3e %.3e".format(0.029, 23000.0))
+	println("scala float format UK:   %.3f %.3f".formatLocal(Locale.UK, 0.029, 23000.0))
+	println("scala science format UK: %.3e %.3e".formatLocal(Locale.UK, 0.029, 23000.0))
+	*/
 		try {
 			parseArgs(name + " "+version, args)
 		} catch {
@@ -242,6 +251,7 @@ object DianaScorer extends CLIApplication {
 				return
 			}
 		}
+
 		
 		/*
 		if (decoyEsv != null) {
@@ -335,10 +345,10 @@ object DianaScorer extends CLIApplication {
 					rp.peptideSequence,
 					Array(
 						new ResultReplicate(
-							spc.area,
+							spc.correctedArea,
 							0,
 							if (!spc.missing)
-								rp.measuredTransitions.zip(spc.areas).map(t => 
+								rp.measuredTransitions.zip(spc.correctedAreas).map(t => 
 									new ResultTransition(
 										t._1.mz,
 										t._1.ion,
@@ -399,7 +409,8 @@ object DianaScorer extends CLIApplication {
 			}
 				
 			
-			esv.headers = Array("area",
+			esv.headers = Array("rawArea",
+								"correctedArea",
 								"rtProb",
 								"fragmentRankAllRatioProb","fragmentRankPcsRatioProb","fragmentMarkovAllRatioProb","fragmentMarkovPcsRatioProb","fragmentCorrScore",
 								"isotopeRankAllRatioProb","isotopeRankPcsRatioProb","isotopeMarkovAllRatioProb","isotopeMarkovPcsRatioProb","isotopeCorrScore",
@@ -417,33 +428,35 @@ object DianaScorer extends CLIApplication {
 					))
 			var ew = new EsvWriter(esv, bw)
 			
+			val uk = Locale.UK
 			for (spc <- pcgroups.flatten) 
 				ew.write(List(
-						"%10.1f".format(spc.area), 
-						"%.2e".format(spc.rtProb), 
+						"%10.1f".formatLocal(uk, spc.rawArea), 
+						"%10.1f".formatLocal(uk, spc.correctedArea), 
+						"%.2e".formatLocal(uk, spc.rtProb), 
 						
-						"%.2e".format(spc.fragmentRankAllRatioProb), 
-						"%.2e".format(spc.fragmentRankPcsRatioProb), 
-						"%.2e".format(spc.fragmentMarkovAllRatioProb), 
-						"%.2e".format(spc.fragmentMarkovPcsRatioProb), 
-						"%.4f".format(spc.fragmentCorrScore), 
+						"%.2e".formatLocal(uk, spc.fragmentRankAllRatioProb), 
+						"%.2e".formatLocal(uk, spc.fragmentRankPcsRatioProb), 
+						"%.2e".formatLocal(uk, spc.fragmentMarkovAllRatioProb), 
+						"%.2e".formatLocal(uk, spc.fragmentMarkovPcsRatioProb), 
+						"%.4f".formatLocal(uk, spc.fragmentCorrScore), 
 						
-						"%.2e".format(spc.isotopeRankAllRatioProb),
-						"%.2e".format(spc.isotopeRankPcsRatioProb),
-						"%.2e".format(spc.isotopeMarkovAllRatioProb),
-						"%.2e".format(spc.isotopeMarkovPcsRatioProb),
-						"%.4f".format(spc.isotopeCorrScore), 
+						"%.2e".formatLocal(uk, spc.isotopeRankAllRatioProb),
+						"%.2e".formatLocal(uk, spc.isotopeRankPcsRatioProb),
+						"%.2e".formatLocal(uk, spc.isotopeMarkovAllRatioProb),
+						"%.2e".formatLocal(uk, spc.isotopeMarkovPcsRatioProb),
+						"%.4f".formatLocal(uk, spc.isotopeCorrScore), 
 						
-						"%.2e".format(spc.pscore), 
-						"%.2e".format(spc.qvalue), 
-						"%.1f".format(spc.rtStart), 
-						"%.1f".format(spc.rtApex), 
-						"%.1f".format(spc.rtEnd), 
-						"%5.1f".format(spc.reference.retentionTime.peak),
-						"%.2f".format(spc.reference.mz),
+						"%.2e".formatLocal(uk, spc.pscore), 
+						"%.2e".formatLocal(uk, spc.qvalue), 
+						"%.1f".formatLocal(uk, spc.rtStart), 
+						"%.1f".formatLocal(uk, spc.rtApex), 
+						"%.1f".formatLocal(uk, spc.rtEnd), 
+						"%5.1f".formatLocal(uk, spc.reference.retentionTime.peak),
+						"%.2f".formatLocal(uk, spc.reference.mz),
 						spc.reference.charge,
-						"%.1f".format(spc.maxIntensity),
-						"%.1f".format(spc.maxEstimate),
+						"%.1f".formatLocal(uk, spc.maxIntensity),
+						"%.1f".formatLocal(uk, spc.maxEstimate),
 						spc.alternatives,
 						spc.reference.proteinName, 
 						spc.reference.peptideSequence
@@ -537,7 +550,7 @@ object DianaScorer extends CLIApplication {
 		
 		return new AnubisInput(seq, q1, cg, isotopeChroms.map(ic => {
 						val mz = ic._1.q1
-						AnubisInput.Fragment(mz, "isotope %.2f".format(mz))
+						AnubisInput.Fragment(mz, "isotope %.2f".formatLocal(Locale.UK, mz))
 					}), 
 					r.toArray, new AnubisParams)
 	}
