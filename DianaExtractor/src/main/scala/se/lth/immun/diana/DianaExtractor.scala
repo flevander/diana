@@ -12,6 +12,8 @@ import java.io.BufferedReader
 import java.io.FileWriter
 import java.io.BufferedWriter
 import java.io.IOException
+import java.io.InputStreamReader
+import java.util.zip.GZIPInputStream
 import java.util.Calendar
 import java.util.Properties
 import java.text.SimpleDateFormat
@@ -187,7 +189,13 @@ object DianaExtractor extends CLIApplication {
     	tramlFiles.foreach(f => println("    "+f))
     	println()
     	
-		xr = new XmlReader(new BufferedReader(new FileReader(swathFile)))
+		xr = new XmlReader(
+				if (swathFile.getName.toLowerCase.endsWith(".gz"))
+					new BufferedReader(new InputStreamReader(
+						new GZIPInputStream(new FileInputStream(swathFile))))
+				else
+					new BufferedReader(new FileReader(swathFile))
+			)
 		xr.force = force
 		handleSwathFile(xr, swathFile)
 		
