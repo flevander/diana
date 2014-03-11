@@ -7,7 +7,7 @@
   <properties>
     <scala.version>2.10.0</scala.version>
     <short.name>diana-extract</short.name>
-    <mainClass>se.lth.immun.swath.DianaExtractor</mainClass>
+    <mainClass>se.lth.immun.diana.DianaExtractor</mainClass>
     <script.file>target/${short.name}</script.file>
     <selfContained.jar>${basedir}/target/${build.finalName}-jar-with-dependencies.jar</selfContained.jar>
   </properties>
