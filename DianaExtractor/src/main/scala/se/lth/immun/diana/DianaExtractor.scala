@@ -26,6 +26,7 @@ import se.lth.immun.chem._
 import ms.numpress.MSNumpress
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.ArrayBuilder
 
 import org.apache.commons.math3.distribution.NormalDistribution
 
@@ -80,7 +81,8 @@ object DianaExtractor extends CLIApplication {
 	var xr:XmlReader 			= null
 	var numSpec					= 0
 	var specPerSwath			= 0
-	var typesOfSpectra			= SWATHS_IN_FILE+1
+	var diaWindowMode			= "gillet"
+	var getQ1Window:(GhostSpectrum => TransitionPartitioning.Q1Window) = gilletQ1Window _
 	var swathWidth 				= 25.0
 	var minDiffCutoff			= 0.0
 	var minDiffPPM				= 10
@@ -89,14 +91,17 @@ object DianaExtractor extends CLIApplication {
 	var nIsotopes				= 0
 	var nd 					= new NormalDistribution
 
-	var transitionSets		= new ArrayBuffer[Array[Array[GhostTransition]]]
-	var chromSets			= new ArrayBuffer[Array[Array[Array[Double]]]]
-	var isotopeSets			= new ArrayBuffer[Array[Isotope]]
-	var isotopeChromSets	= new ArrayBuffer[Array[Array[Double]]]
+	var transitionSets		= new ArrayBuffer[TransitionPartitioning]
+	var isotopeSets			= new ArrayBuffer[Seq[ChromExtract[Isotope]]]
+	//var isotopeChromSets	= new ArrayBuffer[Array[Array[Double]]]
 	var times 				= new Array[Array[Double]](SWATHS_IN_FILE)
-	var ms1Times			= new ArrayBuffer[Double]
-	var specCounters		= new Array[Int](SWATHS_IN_FILE)
+	var ms1Times			= ChromBuilder()
+	//var specCounters		= new Array[Int](SWATHS_IN_FILE)
+	
 	var ms1SpecCounter		= -1
+	var capacitiesFixed		= false
+	var capFixPercent		= 0.1
+	
 	
 	var outFile:File 	= null
 	var out:XmlWriter 	= null
@@ -135,7 +140,7 @@ object DianaExtractor extends CLIApplication {
 					try {
 						minDiffPPM = s.toInt
 					} catch {
-						case _ => {
+						case _:Throwable => {
 							minDiffCutoff = s.toDouble
 							minDiffPPM = 0
 						}
@@ -146,15 +151,21 @@ object DianaExtractor extends CLIApplication {
 		opt("mode", 
 				"Mode for XIC extraction, best|uniform|normal|square|tri (default: uniform) ", 
 				s => 
-					if (Array("best", "uniform", "normal", "square", "tri").contains(mode))
+					if (Array("best", "uniform", "normal", "square", "tri").contains(s))
 						mode = s
 					else 
 						throw new Exception("Unknown extraction mode '"+s+"'"), 
 				"X")
 		
-		opt("types-of-spectra", 
-				"The number of different precursor swaths (default 32+1)", 
-				s => typesOfSpectra = s.toInt, "X")
+		opt("dia-windows", 
+				"Mode of dia window detection, gillet | snoop(guess from file) (default "+diaWindowMode+" (1 MS1 + 32 MS2))", 
+				s => 
+					if (Array("gillet", "snoop").contains(s)) {
+						diaWindowMode = s
+						if (s == "gillet") 		getQ1Window = gilletQ1Window _
+						else if (s == "snoop") 	getQ1Window = snoopQ1Window _
+					} else 
+						throw new Exception("Unknown dia window mode '"+s+"'"), "X")
 		
 		opt("isotopes", 
 				"The number highest precursor isotopes to extract (default 0)", 
@@ -198,10 +209,30 @@ object DianaExtractor extends CLIApplication {
 			)
 		xr.force = force
 		handleSwathFile(xr, swathFile)
-		
+		 
 		val after = System.currentTimeMillis
-		println("  time taken: "+(after-before)+"ms")
-		println("spectra read: "+specCounters.sum)
+		val nSpectraPerPartition = transitionSets.head.parts.values.map(_.times.nocopyResult.length)
+		val runt = Runtime.getRuntime
+		println("        heap size: "+(runt.totalMemory / 1000000) + " / "+(runt.maxMemory / 1000000) + " Mb")
+		println("    n ms1 spectra: "+ms1SpecCounter)
+		println("    n dia windows: "+transitionSets.head.parts.size)
+		println("spectra per swath: "+nSpectraPerPartition.min + " - "+nSpectraPerPartition.max)
+		println("       time taken: "+niceTiming(after-before))
+		println("     spectra read: "+transitionSets.head.parts.values.map(_.times.nocopyResult.length).sum)
+	}
+	
+	
+	
+	def niceTiming(t:Long) = {
+		val ms = t % 1000
+		var x = t / 1000
+		val s = x % 60
+		x = x / 60
+		val m = x & 60
+		x = x / 60
+		val h = x % 24
+		val d = x / 24
+		"%d days %d:%d:%d.%ds".format(d, h, m, s, ms)
 	}
 	
 	
@@ -224,6 +255,10 @@ object DianaExtractor extends CLIApplication {
 		var mzML = MzML.fromFile(xr, dh, binaryFileChannel)
 		println("DONE WITH "+swathFile)
 		println
+		
+		val runt = Runtime.getRuntime
+		println(" heap size before writing: "+(runt.totalMemory / 1000000) + " / "+(runt.maxMemory / 1000000) + " Mb")
+		println()
 		
 		for (j <- 0 until tramls.length) {
 			currTramlOut = j
@@ -252,7 +287,7 @@ object DianaExtractor extends CLIApplication {
 			var dw = new MzMLDataWriters(
 							0,
 							ws => {},
-							chromSets.zip(specCounters).filter(_._2 > -1).map(_._1.length).sum,
+							transitionSets(j).parts.values.filter(_.times.nocopyResult.nonEmpty).map(_.chroms.length).sum,
 							writeChroms
 						)
 			
@@ -264,36 +299,25 @@ object DianaExtractor extends CLIApplication {
 	
 	def setupDataStructures(numSpec:Int) = {
 		this.numSpec = numSpec
-		specPerSwath = numSpec / typesOfSpectra
 		
 		println("      num spectra: "+numSpec)
-		println(" types of spectra: "+typesOfSpectra)
-		println("spectra per swath: "+specPerSwath)
 		println("|                    |")
 		print("|")
 
-    	for (i <- 0 until SWATHS_IN_FILE) {
+    	/*for (i <- 0 until SWATHS_IN_FILE) {
     		times(i) 		= new Array[Double](specPerSwath)
     		specCounters(i) = -1
-    	}
+    	}*/
 		
 		val l = tramls.length
     	for (j <- 0 until l) {
     		val traml = tramls(j)
-    		transitionSets 	+= new Array(SWATHS_IN_FILE)
-    		chromSets		+= new Array(SWATHS_IN_FILE)
-    		isotopeChromSets += new Array(SWATHS_IN_FILE)
-	    	isotopeSets 	+= traml.transitionGroups.toSeq
+    		transitionSets 	+= new TransitionPartitioning(traml.transitions.map(t => new ChromExtract(t)))
+    		isotopeSets 	+= traml.transitionGroups.toSeq
 	    								.map(t => getIsotopes(traml)(t._2))
-	    								.flatten.sortBy(_.q1).toArray
-	    	isotopeChromSets(j) = isotopeSets(j).map(_ => new Array[Double](specPerSwath))
-    		for (i <- 0 until SWATHS_IN_FILE) {
-    			var mz = 400 + swathWidth*i
-	    		transitionSets(j)(i) = traml.transitions.filter(tr => 
-							tr.q1 >= mz && tr.q1 < mz + swathWidth
-	    				).toArray
-	    		chromSets(j)(i) 		= transitionSets(j)(i).map(_ => new Array[Double](specPerSwath))
-    		}
+	    								.flatten.sortBy(_.q1)
+	    								.map(iso => new ChromExtract(iso))
+	    	//isotopeChromSets(j) = isotopeSets(j).map(_ => new Array[Double](specPerSwath))
 	    }
 	}
 	
@@ -326,6 +350,25 @@ object DianaExtractor extends CLIApplication {
 				println("|")
 		}
 		
+		if (specCount > numSpec*capFixPercent && !capacitiesFixed) {
+			def hint[T](cb:ChromBuilder) = {
+				val hl = (cb.nocopyResult.length * numSpec) / (specCount - 2)
+				cb.sizeHint(hl)
+			}
+			
+			for (ts <- transitionSets)
+				for (partExtract <- ts.parts.values) {
+					hint(partExtract.times)
+					for (chromExtract <- partExtract.chroms)
+						hint(chromExtract.chrom)
+				}
+			for (set <- isotopeSets)
+				for (is <- set)
+					hint(is.chrom)
+			hint(ms1Times)
+			capacitiesFixed = true
+		}
+		
 		val mzs 			= gs.mzs
 		val intensities 	= gs.intensities
 				
@@ -335,18 +378,18 @@ object DianaExtractor extends CLIApplication {
 			ms1Times += gs.scanStartTime
 			for (i <- 0 until isotopeSets.length) {
 				val isotopes 	= isotopeSets(i)
-				val chroms 		= isotopeChromSets(i)
 				
 				var j 	= 0
 				val jl 	= isotopes.length
 		
 				while (j < jl) {
+					val chromExtract = isotopes(j)
 					var k = 0
-					var kl = mzs.length
-					var q1 = isotopes(j).q1
-					var ppmCutoff = q1 / 1000000 * minDiffPPM
+					val kl = mzs.length
+					val q1 = chromExtract.id.q1
+					val ppmCutoff = q1 / 1000000 * minDiffPPM
 					var intensity = 0.0
-					var cutoff = math.max(ppmCutoff, minDiffCutoff)
+					val cutoff = math.max(ppmCutoff, minDiffCutoff)
 					
 					if (mode == "best") {
 						var minDiff = Double.MaxValue
@@ -397,32 +440,35 @@ object DianaExtractor extends CLIApplication {
 						}
 					}
 					
-					chroms(j)(ms1SpecCounter) = intensity
+					chromExtract.chrom += intensity
 					j += 1
 				}
 			}
 			
 		} else if (gs.msLevel == 2) {
 			
-			val si = math.floor((gs.q1 - 400) / 25).toInt
-			specCounters(si) += 1
-			val sc = specCounters(si)
+			val q1window = getQ1Window(gs)
 			
-			times(si)(sc) 		= gs.scanStartTime
+			if (transitionSets.head.parts contains q1window) {
+				
+			}
+			
+			val t = gs.scanStartTime
 	    	for (j <- 0 until tramls.length) {
-				val transitions 	= transitionSets(j)(si)
-				val chroms 			= chromSets(j)(si)
+				val extracts 	= transitionSets(j).getTransitions(q1window)
+				extracts.times += t
 				
 				var i 	= 0
-				val il 	= transitions.length
+				val il 	= extracts.chroms.length
 		
 				while (i < il) {
+					val chromExtract = extracts.chroms(i)
 					var k = 0
-					var kl = mzs.length
-					var q3 = transitions(i).q3
-					var ppmCutoff = q3 / 1000000 * minDiffPPM
+					val kl = mzs.length
+					val q3 = chromExtract.id.q3
+					val ppmCutoff = q3 / 1000000 * minDiffPPM
 					var intensity = 0.0
-					var cutoff = math.max(ppmCutoff, minDiffCutoff)
+					val cutoff = math.max(ppmCutoff, minDiffCutoff)
 					
 					if (mode == "best") {
 						var minDiff = Double.MaxValue
@@ -473,7 +519,7 @@ object DianaExtractor extends CLIApplication {
 						}
 					}
 					
-					chroms(i)(sc) = intensity
+					chromExtract.chrom += intensity
 					i += 1
 				}
 	    	}
@@ -481,30 +527,33 @@ object DianaExtractor extends CLIApplication {
 	}
 	
 	
-	def writeChroms(w:XmlWriter) = {
-		var index = 0
-		val tramlChromSet = chromSets(currTramlOut)
-		for (iset <- 0 until tramlChromSet.length) {
-			if (specCounters(iset) > 0) {
-				var chroms = tramlChromSet(iset)
-				for (ichrom <- 0 until chroms.length) {
-					var t = transitionSets(currTramlOut)(iset)(ichrom)
-					var gc = new GhostChromatogram
-					gc.precursor 		= t.q1
-					gc.product 			= t.q3
-					gc.collisionEnergy 	= t.ce
-					gc.times 			= times(iset)
-					gc.intensities 		= chroms(ichrom)
-					gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
-											MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
-					gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
-											MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
-					gc.toChromatogram(index).write(w, null)
-					index += 1
-				}
-			}
-		}
-		
+	def writeFragmentChrom(
+			w:XmlWriter,
+			index:Int,
+			pe:TransitionPartitioning.PartitionExtract, 
+			ce:ChromExtract[GhostTransition]
+	) = {
+		var t = ce.id
+		var gc = new GhostChromatogram
+		gc.precursor 		= t.q1
+		gc.product 			= t.q3
+		gc.collisionEnergy 	= t.ce
+		gc.times 			= pe.times.nocopyResult
+		gc.intensities 		= ce.chrom.nocopyResult
+		gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
+								MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
+		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
+								MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
+		gc.toChromatogram(index).write(w, null)
+	}
+	
+	
+	def writeIsotopeChrom(
+			w:XmlWriter,
+			index:Int,
+			times:Seq[Double],
+			ce:ChromExtract[Isotope]
+	) = {
 		def occurenceParam(occ:Double) = {
 			val u = new UserParam
 			u.name = "isotope occurence"
@@ -513,28 +562,58 @@ object DianaExtractor extends CLIApplication {
 			u
 		}
 		
-		val _times = ms1Times.toArray
-		val chroms = isotopeChromSets(currTramlOut)
+		var iso = ce.id
+		var gc = new GhostChromatogram
+		gc.precursor 		= iso.q1
+		gc.product 			= 0.0
+		gc.collisionEnergy 	= 0.0
+		gc.chromatogram.userParams += occurenceParam(iso.occurence)
+		gc.times 			= times
+		gc.intensities 		= ce.chrom.nocopyResult
+		gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
+									MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
+		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
+									MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
+		gc.toChromatogram(index).write(w, null)
+	}
+	
+	
+	def writeChroms(w:XmlWriter) = {
+		var index = 0
+		val tramlChromSet = transitionSets(currTramlOut)
+		for (partitionExtract <- tramlChromSet.parts.values)
+			for (chromExtract <- partitionExtract.chroms) {
+				writeFragmentChrom(w, index, partitionExtract, chromExtract)
+				index += 1
+			}
+		
+		val _times = ms1Times.nocopyResult
+		val chroms = isotopeSets(currTramlOut)
 		if (ms1SpecCounter > 0) {
-			for (ichrom <- 0 until chroms.length) {
-				var t = isotopeSets(currTramlOut)(ichrom)
-				var gc = new GhostChromatogram
-				gc.precursor 		= t.q1
-				gc.product 			= 0.0
-				gc.collisionEnergy 	= 0.0
-				gc.chromatogram.userParams += occurenceParam(t.occurence)
-				gc.times 			= _times
-				gc.intensities 		= chroms(ichrom)
-				gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
-											MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
-				gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
-											MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
-				gc.toChromatogram(index).write(w, null)
+			for (chromExtract <- chroms) {
+				writeIsotopeChrom(w, index, _times, chromExtract)
 				index += 1
 			}
 		}
 	}
 	
+	
+	
+	
+	def gilletQ1Window(gs:GhostSpectrum) = {
+		val swathIndex = math.floor((gs.q1 - 400) / 25).toInt
+		TransitionPartitioning.Q1Window(400 + swathIndex*25, 425 + swathIndex*25)
+	}
+	
+	def snoopQ1Window(gs:GhostSpectrum) = {
+		val cvs = gs.spectrum.precursors.head.isolationWindow.get.cvParams
+		val isolationWindowTargetMz = cvs.find(_.accession == "MS:1000827").get.value.get.toDouble
+		val isolationWindowLowerOffset = cvs.find(_.accession == "MS:1000828").get.value.get.toDouble
+		val isolationWindowUpperOffset = cvs.find(_.accession == "MS:1000829").get.value.get.toDouble
+		TransitionPartitioning.Q1Window(
+				isolationWindowTargetMz - isolationWindowLowerOffset, 
+				isolationWindowTargetMz + isolationWindowUpperOffset)
+	}
 	/*
 	
 	def writeBinaryArray(w:XmlWriter, a:Array[Double], cvParam:CvParam) = {
