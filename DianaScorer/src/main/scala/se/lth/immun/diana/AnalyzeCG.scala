@@ -28,12 +28,15 @@ object AnalyzeCG {
 
 	
 	
-	def apply(aIn:AnubisInput, iAIn:AnubisInput, pc:ReferencePrecursor):Seq[Carrier] = {
+	def apply(aIn:AnubisInput, iAIn:Option[AnubisInput], pc:ReferencePrecursor):Seq[Carrier] = {
 		
 		val before 		= System.currentTimeMillis
 		
 		val fChroms = aIn.cg.chromatograms
-		val iChroms:Seq[XChromatogram] = if (iAIn != null) iAIn.cg.chromatograms else Nil
+		val iChroms:Seq[XChromatogram] = iAIn match {
+			case Some(x) => x.cg.chromatograms 
+			case None => Nil
+		}
 		
 		val allChroms 	= fChroms ++ iChroms
 		if (allChroms.isEmpty) return Nil 
@@ -61,8 +64,8 @@ object AnalyzeCG {
 		
 		
 		val filteredCarriers = calculateFragmentScores(aIn, smooths, pc, carriers)
-		if (iAIn != null)
-			calculateIsotopeScores(iAIn, pc, filteredCarriers)
+		if (iAIn.nonEmpty)
+			calculateIsotopeScores(iAIn.get, pc, filteredCarriers)
 		
 		for (c <- filteredCarriers)
 			c.rtProb = fragmentState.rtProb(c.fragmentEstimation.iEstimateApex)

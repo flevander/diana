@@ -411,6 +411,7 @@ object DianaScorer extends CLIApplication {
 			
 			esv.headers = Array("rawArea",
 								"correctedArea",
+								"isotopeArea",
 								"rtProb",
 								"fragmentRankAllRatioProb","fragmentRankPcsRatioProb","fragmentMarkovAllRatioProb","fragmentMarkovPcsRatioProb","fragmentCorrScore",
 								"isotopeRankAllRatioProb","isotopeRankPcsRatioProb","isotopeMarkovAllRatioProb","isotopeMarkovPcsRatioProb","isotopeCorrScore",
@@ -433,6 +434,7 @@ object DianaScorer extends CLIApplication {
 				ew.write(List(
 						"%10.1f".formatLocal(uk, spc.rawArea), 
 						"%10.1f".formatLocal(uk, spc.correctedArea), 
+						"%10.1f".formatLocal(uk, spc.isotopeArea), 
 						"%.2e".formatLocal(uk, spc.rtProb), 
 						
 						"%.2e".formatLocal(uk, spc.fragmentRankAllRatioProb), 
@@ -490,15 +492,15 @@ object DianaScorer extends CLIApplication {
 			try {
 	        	xmzML.grouper.extractGroup(pc.mz) match {
 	            	case Some(cg) => {
-	            		var iAIn:AnubisInput = null
-	            		if (nIsotopes > 1) {
-	            			iAIn = getIsotopeInput(xmzML, pc)
-	            		}
+	            		var iAIn =
+	            			if (nIsotopes > 1)
+	            				Some(getIsotopeInput(xmzML, pc))
+	            			else None
 	            		
 	            		val aIn = AnubisInput.of(cg, pc, new AnubisParams)
 	            		val carriers = AnalyzeCG(aIn, iAIn, pc)
 	            		if (carriers.isEmpty) List(new SwathPeptideCandidate(pc))
-	            		else carriers.map(c => SwathPeptideCandidate(pc, aIn.cg, c, pScoreFunc, carriers.length))
+	            		else carriers.map(c => SwathPeptideCandidate(pc, aIn.cg, iAIn.map(_.cg), c, pScoreFunc, carriers.length))
 	            	}
 	            	case None => {
 	            		//TODO: error handling

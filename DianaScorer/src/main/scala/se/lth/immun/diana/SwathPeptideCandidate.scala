@@ -11,6 +11,7 @@ object SwathPeptideCandidate {
 	def apply(
 			rp:ReferencePrecursor, 
 			cg:XChromatogramGroup, 
+			icg:Option[XChromatogramGroup], 
 			c:Carrier,
 			pScoreFunc:Carrier => Double,
 			n:Int = 1
@@ -34,6 +35,12 @@ object SwathPeptideCandidate {
 		x.correctedAreas 	= c.fragmentEstimation.areas
 		x.rawAreas 	= cg.chromatograms.map(_.intensities.slice(c.g.istart, c.g.iend).sum)
 		x.missing 	= false
+		
+		x.isotopeAreas = 
+			icg match {
+				case Some(x) => x.chromatograms.map(_.intensities.slice(c.g.istart, c.g.iend).sum)
+				case None => Nil
+			}
 		
 		val t 		= cg.chromatograms.head.times
 		x.rtStart 	= t(c.g.istart)
@@ -77,8 +84,9 @@ class SwathPeptideCandidate(
 	var rtProb				= 0.0
 	var pscore 		= 1.0
 	var qvalue 		= -1.0
-	var correctedAreas 		= Seq[Double]()
+	var correctedAreas 	= Seq[Double]()
 	var rawAreas 		= Seq[Double]()
+	var isotopeAreas 	= Seq[Double]()
 	var maxIntensity 	= -1.0
 	var maxEstimate		= -1.0
 	var alternatives	= 0 // total number of candidates for this assay
@@ -87,6 +95,8 @@ class SwathPeptideCandidate(
 	var rtApex 		= -1.0
 	var rtEnd 		= -1.0
 	
-	def correctedArea = if (correctedAreas == null || correctedAreas.isEmpty) 0.0 else correctedAreas.sum
-	def rawArea = if (rawAreas == null || rawAreas.isEmpty) 0.0 else rawAreas.sum
+	def safeSum(x:Seq[Double]) = if (x == null || x.isEmpty) 0.0 else x.sum
+	def correctedArea 	= safeSum(correctedAreas)
+	def rawArea 		= safeSum(rawAreas)
+	def isotopeArea 	= safeSum(isotopeAreas)
 }
