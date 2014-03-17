@@ -95,9 +95,10 @@ object DianaExtractor extends CLIApplication {
 	var isotopeSets			= new ArrayBuffer[Seq[ChromExtract[Isotope]]]
 	//var isotopeChromSets	= new ArrayBuffer[Array[Array[Double]]]
 	var times 				= new Array[Array[Double]](SWATHS_IN_FILE)
-	var ms1Times			= ChromBuilder()
+	var ms1Times:ChromBuilder = _
 	//var specCounters		= new Array[Int](SWATHS_IN_FILE)
 	
+	var subSampleMs1 		= 1
 	var ms1SpecCounter		= -1
 	var capacitiesFixed		= false
 	var capFixPercent		= 0.1
@@ -175,6 +176,10 @@ object DianaExtractor extends CLIApplication {
 				"Ignore missing attributes in mzML files", 
 				s => force = true)
 		
+		opt("sub-sample-ms1", 
+				"Sum k consequent ms1 spectra and store as one value", 
+				s => subSampleMs1 = s.toInt, "k")
+		
 		opt("out-dir", 
 				"Directory where chromatogram mzML files should be stored.", 
 				s => outDir = new File(s), "X")
@@ -192,6 +197,7 @@ object DianaExtractor extends CLIApplication {
 		println(name + " "+version)
     	println("  swath mzML file: " + swathFile)
     	println("     num isotopes: " + nIsotopes)
+    	println("   sub sample ms1: " + subSampleMs1)
     	println("            force: " + force)
     	println("     min diff PPM: " + minDiffPPM)
     	println("      min diff Da: " + minDiffCutoff)
@@ -232,7 +238,7 @@ object DianaExtractor extends CLIApplication {
 		x = x / 60
 		val h = x % 24
 		val d = x / 24
-		"%d days %d:%d:%d.%ds".format(d, h, m, s, ms)
+		"%d days %02d:%02d:%02d.%ds".format(d, h, m, s, ms)
 	}
 	
 	
@@ -308,6 +314,9 @@ object DianaExtractor extends CLIApplication {
     		times(i) 		= new Array[Double](specPerSwath)
     		specCounters(i) = -1
     	}*/
+		ms1Times =
+			if (subSampleMs1 == 1) 	ChromBuilder()
+			else					AggrChromBuilder(subSampleMs1, true)
 		
 		val l = tramls.length
     	for (j <- 0 until l) {
@@ -316,7 +325,7 @@ object DianaExtractor extends CLIApplication {
     		isotopeSets 	+= traml.transitionGroups.toSeq
 	    								.map(t => getIsotopes(traml)(t._2))
 	    								.flatten.sortBy(_.q1)
-	    								.map(iso => new ChromExtract(iso))
+	    								.map(iso => new ChromExtract(iso, subSampleMs1))
 	    	//isotopeChromSets(j) = isotopeSets(j).map(_ => new Array[Double](specPerSwath))
 	    }
 	}

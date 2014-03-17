@@ -7,67 +7,67 @@ object ChromBuilder {
 	def apply() = new ChromBuilder()
 }
 
-class ChromBuilder(val sizeIncrement:Double = 2.0) extends ArrayBuilder[Double] {
+class ChromBuilder(val sizeIncrement: Double = 2.0) extends ArrayBuilder[Double] {
 
-    private var elems: Array[Double] = _
-    private var capacity: Int = 0
-    private var size: Int = 0
+	protected var elems: Array[Double] = _
+	protected var capacity: Int = 0
+	protected var size: Int = 0
 
-    private def mkArray(size: Int): Array[Double] = {
-      val newelems = new Array[Double](size)
-      if (this.size > 0) Array.copy(elems, 0, newelems, 0, this.size)
-      newelems
-    }
+	private def mkArray(size: Int): Array[Double] = {
+		val newelems = new Array[Double](size)
+		if (this.size > 0) Array.copy(elems, 0, newelems, 0, this.size)
+		newelems
+	}
 
-    private def resize(size: Int) {
-      elems = mkArray(size)
-      capacity = size
-    }
+	private def resize(size: Int) {
+		elems = mkArray(size)
+		capacity = size
+	}
 
-    override def sizeHint(size: Int) {
-      if (capacity < size) resize(size)
-    }
+	override def sizeHint(size: Int) {
+		if (capacity < size) resize(size)
+	}
 
-    private def ensureSize(size: Int) {
-      if (capacity < size || capacity == 0) {
-        var newsize = if (capacity == 0) 16 else capacity * sizeIncrement
-        while (newsize < size) newsize *= sizeIncrement
-        resize(newsize.toInt + 1)
-      }
-    }
+	protected def ensureSize(size: Int) {
+		if (capacity < size || capacity == 0) {
+			var newsize = if (capacity == 0) 16 else capacity * sizeIncrement
+			while (newsize < size) newsize *= sizeIncrement
+			resize(newsize.toInt + 1)
+		}
+	}
 
-    def +=(elem: Double): this.type = {
-      ensureSize(size + 1)
-      elems(size) = elem
-      size += 1
-      this
-    }
+	def +=(elem: Double): this.type = {
+		ensureSize(size + 1)
+		elems(size) = elem
+		size += 1
+		this
+	}
 
-    override def ++=(xs: TraversableOnce[Double]): this.type = xs match {
-      case xs: WrappedArray.ofDouble =>
-        ensureSize(this.size + xs.length)
-        Array.copy(xs.array, 0, elems, this.size, xs.length)
-        size += xs.length
-        this
-      case _ =>
-        super.++=(xs)
-    }
+	override def ++=(xs: TraversableOnce[Double]): this.type = xs match {
+		case xs: WrappedArray.ofDouble =>
+			ensureSize(this.size + xs.length)
+			Array.copy(xs.array, 0, elems, this.size, xs.length)
+			size += xs.length
+			this
+		case _ =>
+			super.++=(xs)
+	}
 
-    def clear() {
-      size = 0
-    }
+	def clear() {
+		size = 0
+	}
 
-    def result() = {
-      if (capacity != 0 && capacity == size) elems
-      else mkArray(size)
-    }
-    
-    def nocopyResult = elems.view(0, size)
+	def result() = {
+		if (capacity != 0 && capacity == size) elems
+		else mkArray(size)
+	}
 
-    override def equals(other: Any): Boolean = other match {
-      case x: ChromBuilder => (size == x.size) && (elems == x.elems)
-      case _ => false
-    }
+	def nocopyResult = elems.view(0, size)
 
-    override def toString = "ChromBuilder"
-  }
+	override def equals(other: Any): Boolean = other match {
+		case x: ChromBuilder => (size == x.size) && (elems == x.elems)
+		case _ => false
+	}
+
+	override def toString = "ChromBuilder"
+}
