@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>se.lth.immun</groupId>
   <artifactId>DianaAnalyzeLib</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <inceptionYear>2012</inceptionYear>
   <properties>
     <scala.version>2.10.0</scala.version>
@@ -35,11 +35,6 @@
     	<version>1.0.0</version>
     </dependency>
     <dependency>
-    	<groupId>org.apache.commons</groupId>
-    	<artifactId>commons-math3</artifactId>
-    	<version>3.0</version>
-    </dependency>
-    <dependency>
         <groupId>se.lth.immun</groupId>
         <artifactId>MarkovChain</artifactId>
         <version>1.0.0</version>
@@ -62,7 +57,7 @@
     <dependency>
     	<groupId>se.lth.immun</groupId>
     	<artifactId>AnubisReferenceFile</artifactId>
-    	<version>1.6.0</version>
+    	<version>1.6.1</version>
     </dependency>
   </dependencies>
   
