@@ -22,6 +22,7 @@ import se.lth.immun.mzml._
 import se.lth.immun.mzml.ghost._
 import se.lth.immun.traml.ghost._
 import se.lth.immun.chem._
+import se.lth.immun.unimod.UniMod
 
 import ms.numpress.MSNumpress
 
@@ -67,6 +68,7 @@ object DianaExtractor extends CLIApplication {
 	}
 	
 	class Isotope(
+			val seq:String,
 			val q1:Double,
 			val occurence:Double
 	) {}
@@ -88,6 +90,7 @@ object DianaExtractor extends CLIApplication {
 	var minDiffPPM				= 10
 	var mode					= "uniform"
 	var force					= true
+	var noBar					= false
 	var nIsotopes				= 0
 	var nd 					= new NormalDistribution
 
@@ -176,6 +179,10 @@ object DianaExtractor extends CLIApplication {
 				"Ignore missing attributes in mzML files", 
 				s => force = true)
 		
+		opt("no-bar", 
+				"don't print process bar", 
+				s => noBar = true)
+		
 		opt("sub-sample-ms1", 
 				"Sum k consequent ms1 spectra and store as one value", 
 				s => subSampleMs1 = s.toInt, "k")
@@ -199,8 +206,8 @@ object DianaExtractor extends CLIApplication {
     	println("     num isotopes: " + nIsotopes)
     	println("   sub sample ms1: " + subSampleMs1)
     	println("            force: " + force)
-    	println("     min diff PPM: " + minDiffPPM)
-    	println("      min diff Da: " + minDiffCutoff)
+    	println("     max diff PPM: " + minDiffPPM)
+    	println("      max diff Da: " + minDiffCutoff)
     	println("  extraction mode: " + mode)
 		println("      traML files:")
     	tramlFiles.foreach(f => println("    "+f))
@@ -307,9 +314,13 @@ object DianaExtractor extends CLIApplication {
 		this.numSpec = numSpec
 		
 		println("      num spectra: "+numSpec)
-		println("|                    |")
-		print("|")
-
+		
+		if (!noBar) {
+			println("|                    |")
+			print("|")
+		}
+		
+		
     	/*for (i <- 0 until SWATHS_IN_FILE) {
     		times(i) 		= new Array[Double](specPerSwath)
     		specCounters(i) = -1
@@ -333,17 +344,27 @@ object DianaExtractor extends CLIApplication {
 	
 	
 	def getIsotopes(traml:GhostTraML)(gts:Seq[GhostTransition]):Seq[Isotope] = {
+		if (nIsotopes == 0)
+			return Nil
+		
 		val seq 	= traml.peptides(gts.head.peptideRef).sequence
-		val p 		= new Peptide(seq.map(c => StandardAminoAcid.fromChar(c)).toArray)
-		val q1		= gts.head.q1
-		val q1z 	= math.round(p.monoisotopicMass() / q1).toDouble
-		val id = p.getIsotopeDistribution()
-		val isotopes = new ArrayBuffer[Isotope]
-		for (i <- id.intensities.sorted.takeRight(nIsotopes)) {
-			val ii = id.intensities.indexOf(i)
-			isotopes += new Isotope(q1 + ii / q1z, i)
+		try {
+			val p 		= UniMod.parseUniModSequence(seq)
+			val q1		= gts.head.q1
+			val q1z 	= math.round(p.monoisotopicMass() / q1).toDouble
+			val id 		= p.getIsotopeDistribution()
+			val isotopes = new ArrayBuffer[Isotope]
+			for (i <- id.intensities.sorted.takeRight(nIsotopes)) {
+				val ii = id.intensities.indexOf(i)
+				isotopes += new Isotope(seq, q1 + ii / q1z, i)
+			}
+			isotopes
+		} catch {
+			case iae:IllegalArgumentException =>
+				println("Unable to parse peptide from amino acid sequence '"+seq+"'... ")
+				println(iae.getMessage())
+				return Nil
 		}
-		isotopes
 	}
 	
 	
@@ -352,11 +373,13 @@ object DianaExtractor extends CLIApplication {
 		var gs = GhostSpectrum.fromSpectrum(s)
 		
 		specCount += 1
-		if (barCount < 20 && 20*specCount / numSpec > barCount) {
-			print("=")
-			barCount += 1
-			if (barCount == 20)
-				println("|")
+		if (!noBar) {
+			if (barCount < 20 && 20*specCount / numSpec > barCount) {
+				print("=")
+				barCount += 1
+				if (barCount == 20)
+					println("|")
+			}
 		}
 		
 		if (specCount > numSpec*capFixPercent && !capacitiesFixed) {
@@ -380,72 +403,73 @@ object DianaExtractor extends CLIApplication {
 		
 		val mzs 			= gs.mzs
 		val intensities 	= gs.intensities
+		val wl = mzs.length
 				
 		if (gs.msLevel == 1) {
 			
 			ms1SpecCounter += 1
 			ms1Times += gs.scanStartTime
+			
 			for (i <- 0 until isotopeSets.length) {
 				val isotopes 	= isotopeSets(i)
 				
 				var j 	= 0
+				var wstart = 0
+				var wend = 0
 				val jl 	= isotopes.length
 		
 				while (j < jl) {
 					val chromExtract = isotopes(j)
-					var k = 0
-					val kl = mzs.length
 					val q1 = chromExtract.id.q1
+					if (j > 0 && q1 < isotopes(j-1).id.q1)
+						throw new Exception("isotopes are not sorted in ascending q1 order!")
 					val ppmCutoff = q1 / 1000000 * minDiffPPM
 					var intensity = 0.0
 					val cutoff = math.max(ppmCutoff, minDiffCutoff)
 					
+					while (wstart < wl && mzs(wstart) < q1 - cutoff) wstart += 1
+					wend = math.max(wstart, wend)
+					while (wend < wl && mzs(wend) < q1 + cutoff) wend += 1
+					var w = wstart
+
 					if (mode == "best") {
 						var minDiff = Double.MaxValue
-						var bestK = -1
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q1)
+						var bestW = -1
+						while (w < wend) {
+							var d = math.abs(mzs(w) - q1)
 							if (d < minDiff) {
 								minDiff = d
-								bestK = j
+								bestW = w
 							}
-							k += 1
+							w += 1
 						}
 						if (minDiff < cutoff)
-							intensity = intensities(bestK)
+							intensity = intensities(bestW)
 					} else if (mode == "uniform"){
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q1)
-							if (d < cutoff)
-								intensity += intensities(k)
-							k += 1
+						while (w < wend) {
+							intensity += intensities(w)
+							w += 1
 						}
 					} else if (mode == "square") {
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q1)
-							if (d < cutoff) {
-								val x = d / cutoff
-								intensity += intensities(k) * (1 - (x * x))
-							}
-							k += 1
+						while (w < wend) {
+							val d = math.abs(mzs(w) - q1)
+							val x = d / cutoff
+							intensity += intensities(w) * (1 - (x * x))
+							w += 1
 						}
 					} else if (mode == "normal") {
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q1)
-							if (d < cutoff) {
-								val x = d / (2*cutoff)
-								intensity += intensities(k) * 2.50662827 * nd.density(x)
-							}
-							k += 1
+						while (w < wend) {
+							val d = math.abs(mzs(w) - q1)
+							val x = d / (2*cutoff)
+							intensity += intensities(w) * 2.50662827 * nd.density(x)
+							w += 1
 						}
 					} else if (mode == "tri") {
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q1)
-							if (d < cutoff) {
-								val x = d / cutoff
-								intensity += intensities(k) * (1-x)
-							}
-							k += 1
+						while (w < wend) {
+							val d = math.abs(mzs(w) - q1)
+							val x = d / cutoff
+							intensity += intensities(w) * (1-x)
+							w += 1
 						}
 					}
 					
@@ -458,73 +482,67 @@ object DianaExtractor extends CLIApplication {
 			
 			val q1window = getQ1Window(gs)
 			
-			if (transitionSets.head.parts contains q1window) {
-				
-			}
-			
 			val t = gs.scanStartTime
 	    	for (j <- 0 until tramls.length) {
 				val extracts 	= transitionSets(j).getTransitions(q1window)
 				extracts.times += t
 				
 				var i 	= 0
+				var wstart = 0
+				var wend = 0
 				val il 	= extracts.chroms.length
 		
 				while (i < il) {
 					val chromExtract = extracts.chroms(i)
-					var k = 0
-					val kl = mzs.length
 					val q3 = chromExtract.id.q3
+					if (i > 0 && q3 < extracts.chroms(i-1).id.q3)
+						throw new Exception("transitions not sorted by ascending q3")
 					val ppmCutoff = q3 / 1000000 * minDiffPPM
 					var intensity = 0.0
 					val cutoff = math.max(ppmCutoff, minDiffCutoff)
 					
+					while (wstart < wl && mzs(wstart) < q3 - cutoff) wstart += 1
+					wend = math.max(wstart, wend)
+					while (wend < wl && mzs(wend) < q3 + cutoff) wend += 1
+					var w = wstart
+
 					if (mode == "best") {
 						var minDiff = Double.MaxValue
-						var bestK = -1
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q3)
+						var bestW = -1
+						while (w < wend) {
+							val d = math.abs(mzs(w) - q3)
 							if (d < minDiff) {
 								minDiff = d
-								bestK = j
+								bestW = w
 							}
-							k += 1
+							w += 1
 						}
 						if (minDiff < cutoff)
-							intensity = intensities(bestK)
+							intensity = intensities(bestW)
 					} else if (mode == "uniform"){
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q3)
-							if (d < cutoff)
-								intensity += intensities(k)
-							k += 1
+						while (w < wend) {
+							intensity += intensities(w)
+							w += 1
 						}
 					} else if (mode == "square") {
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q3)
-							if (d < cutoff) {
-								val x = d / cutoff
-								intensity += intensities(k) * (1 - (x * x))
-							}
-							k += 1
+						while (w < wend) {
+							val x = math.abs(mzs(w) - q3) / cutoff
+							intensity += intensities(w) * (1 - (x * x))
+							w += 1
 						}
 					} else if (mode == "normal") {
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q3)
-							if (d < cutoff) {
-								val x = d / (2*cutoff)
-								intensity += intensities(k) * 2.50662827 * nd.density(x)
-							}
-							k += 1
+						while (w < wend) {
+							val d = math.abs(mzs(w) - q3)
+							val x = d / (2*cutoff)
+							intensity += intensities(w) * 2.50662827 * nd.density(x)
+							w += 1
 						}
 					} else if (mode == "tri") {
-						while (k < kl) {
-							var d = math.abs(mzs(k) - q3)
-							if (d < cutoff) {
-								val x = d / cutoff
-								intensity += intensities(k) * (1-x)
-							}
-							k += 1
+						while (w < wend) {
+							val d = math.abs(mzs(w) - q3)
+							val x = d / cutoff
+							intensity += intensities(w) * (1-x)
+							w += 1
 						}
 					}
 					
@@ -553,7 +571,9 @@ object DianaExtractor extends CLIApplication {
 								MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
 		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
 								MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
-		gc.toChromatogram(index).write(w, null)
+		val chrom 	= gc.toChromatogram(index)
+		chrom.id 	= t.id
+		chrom.write(w, null)
 	}
 	
 	
@@ -583,7 +603,9 @@ object DianaExtractor extends CLIApplication {
 									MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
 		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
 									MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
-		gc.toChromatogram(index).write(w, null)
+		val chrom 	= gc.toChromatogram(index)
+		chrom.id	= "%s naturally %.2f%% @ %.3".format(ce.id.seq, ce.id.occurence*100, ce.id.q1)
+		chrom.write(w, null)
 	}
 	
 	

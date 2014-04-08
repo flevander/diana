@@ -22,7 +22,7 @@ class TransitionPartitioning(
 	
 	def getTransitions(p:Q1Window) = {
 		if (!(parts contains p))
-			parts += p -> new PartitionExtract(transitions.filter(ce => p.has(ce.id.q1)).toArray)
+			parts += p -> new PartitionExtract(transitions.filter(ce => p.has(ce.id.q1)).sortBy(_.id.q3).toArray)
 		parts(p)
 	}
 }
