@@ -604,7 +604,7 @@ object DianaExtractor extends CLIApplication {
 		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
 									MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
 		val chrom 	= gc.toChromatogram(index)
-		chrom.id	= "%s naturally %.2f%% @ %.3".format(ce.id.seq, ce.id.occurence*100, ce.id.q1)
+		chrom.id	= "%s naturally %.2f%s @ %.3f".format(ce.id.seq, ce.id.occurence*100, "%", ce.id.q1)
 		chrom.write(w, null)
 	}
 	
