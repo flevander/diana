@@ -56,7 +56,7 @@ object AnalyzeCG {
 				fChroms(pc.icurve).intensities.slice(pc.istart, pc.iend).sum > carrierAreaCutoff
 			}
 		}
-		val smooths		= allChroms.map(xc => signalP.getSmoothAndBase(xc.intensities))
+		val smooths		= allChroms.map(xc => signalP.getSmoothAndBase(xc.intensities.toArray))
 		val pcs 		= smooths.map(xc => getPCs(xc))
 		val carriers	= SwathPeakCandidate.groupPCs(pcs, findEdges)
 							.map(g => new Carrier(pc, g, fChroms.length, iChroms.length))
@@ -87,10 +87,10 @@ object AnalyzeCG {
 	) = {
 		val chroms 	= aIn.cg.chromatograms
 		val l 		= chroms.length
-		val t 		= chroms(0).times
+		val t 		= chroms(0).times.toArray
 		
 		var reduced = Filter.baseLineReduce(
-        					chroms.toArray.map(tr => tr.intensities)
+        					chroms.toArray.map(tr => tr.intensities.toArray)
         				)
         var filtered 	= reduced.map(ds => Filter.savitzkyGolay9(ds))
         var ratios 		= new Ratios(filtered)
@@ -135,7 +135,7 @@ object AnalyzeCG {
 		for (c <- ret) {
 			c.fragmentEstimation = c.g.estimateAndIntegrate(
 									fragmentState, 
-									chroms.map(_.intensities).toArray, 
+									chroms.map(_.intensities.toArray).toArray, 
 									c.fragmentValids)
 			c.fragmentCorrScore = fragmentEvaluator.corrScore(c.g, c.fragmentEstimation)
 		}
@@ -151,11 +151,11 @@ object AnalyzeCG {
 	) = {
 		val chroms 	= aIn.cg.chromatograms
 		val l 		= chroms.length
-		val t 		= chroms(0).times
-		val smooths	= chroms.map(xc => signalP.getSmoothAndBase(xc.intensities))
+		val t 		= chroms(0).times.toArray
+		val smooths	= chroms.map(xc => signalP.getSmoothAndBase(xc.intensities.toArray))
 		
 		var reduced = Filter.baseLineReduce(
-        					chroms.toArray.map(tr => tr.intensities)
+        					chroms.toArray.map(tr => tr.intensities.toArray)
         				)
         var filtered 	= reduced.map(ds => Filter.savitzkyGolay9(ds))
         var ratios 		= new Ratios(filtered)
@@ -196,7 +196,7 @@ object AnalyzeCG {
 									"markov")
 			c.isotopeEstimation = c.g.estimateAndIntegrate(
 									isotopeState, 
-									chroms.map(_.intensities).toArray, 
+									chroms.map(_.intensities.toArray).toArray, 
 									c.isotopeValids)
 			c.isotopeCorrScore = isotopeEvaluator.corrScore(c.g, c.isotopeEstimation)
 		}

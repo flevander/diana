@@ -43,6 +43,7 @@ import se.lth.immun.math.Ratios
 
 import se.lth.immun.esv._
 import se.lth.immun.chem._
+import se.lth.immun.unimod.UniMod
 
 object DianaScorer extends CLIApplication {
 
@@ -77,6 +78,7 @@ object DianaScorer extends CLIApplication {
 	var nIsotopes				= 0
 	
 	var quiet 			= true
+	var noBar			= false
 	//var singleResult 	= true
 	
 	
@@ -132,6 +134,10 @@ object DianaScorer extends CLIApplication {
 					AnalyzeCG.pValueCutoff = s.toDouble
 				},
 				"X")
+		
+		opt("no-bar", 
+				"don't print process bar", 
+				s => noBar = true)
 		/*
 		opt("edges", 
 				"edge find strategy to use: strict, L1 och L2 (default: strict)", 
@@ -279,8 +285,7 @@ object DianaScorer extends CLIApplication {
 		//if (noDecoys)
 		//	println("                => no decoy information, will skip FDR calculations")
     	println()
-    	
-    	
+		
 		var qvalues:Seq[(Double, Double)] = Nil
     	var pcgroups = analyzeFile(swathFile, ref, false)
     					.map(_.sortBy(_.pscore))
@@ -488,7 +493,22 @@ object DianaScorer extends CLIApplication {
 			swathXmzML = xmzML
 		}
 		*/
+		var pcCount 	= 0
+		var barCount 	= 0
+		val nPcs 		= ref.precursors.length
+		if (!noBar) {
+			println("|                    |")
+			print("|")
+		}
+		
 		ref.precursors.map(pc => {
+			if (!noBar) {
+				pcCount += 1
+				if (barCount < 20 && (20*pcCount) / nPcs > barCount) {
+					print("=")
+					barCount += 1
+				}
+			}
 			try {
 	        	xmzML.grouper.extractGroup(pc.mz) match {
 	            	case Some(cg) => {
@@ -522,7 +542,7 @@ object DianaScorer extends CLIApplication {
 	
 	def getIsotopeInput(xmzML:XMzML, pc:ReferencePrecursor):AnubisInput = {
 		val seq 	= pc.peptideSequence
-		val p 		= new Peptide(seq.map(c => StandardAminoAcid.fromChar(c)).filter(_ != null).toArray)
+		val p 		= UniMod.parseUniModSequence(seq)
 		val q1		= pc.mz
 		val q1z 	= math.round(p.monoisotopicMass() / q1).toDouble
 		val id = p.getIsotopeDistribution()
