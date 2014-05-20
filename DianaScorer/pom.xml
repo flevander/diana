@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>se.lth.immun</groupId>
   <artifactId>DianaScorer</artifactId>
-  <version>0.5.6</version>
+  <version>0.6.0</version>
   <inceptionYear>2012</inceptionYear>
   <properties>
     <scala.version>2.10.0</scala.version>
@@ -34,7 +34,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>MzML</artifactId>
-  		<version>1.1.1</version>
+  		<version>1.2.1</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
@@ -49,7 +49,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>AnubisLib</artifactId>
-  		<version>1.2.15</version>
+  		<version>1.2.16</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
@@ -89,7 +89,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>App</artifactId>
-  		<version>1.0.0</version>
+  		<version>1.2.0</version>
   	</dependency>
   </dependencies>
   

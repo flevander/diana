@@ -3,6 +3,7 @@ package se.lth.immun.diana
 import se.lth.immun.xml.XmlReader
 import se.lth.immun.xml.XmlWriter
 import se.lth.immun.app.CLIApplication
+import se.lth.immun.app.CLIBar
 import se.lth.immun.app.CommandlineArgumentException
 
 import java.io.File
@@ -60,7 +61,7 @@ object DianaScorer extends CLIApplication {
 	var swathXmzML:XMzML		= null
 	var outFile:File			= null
 	var outEsv					= true
-	var outXml					= true
+	var outXml					= false
 	// decoy
 	/*
 	var decoySwathFile:File 	= null
@@ -77,8 +78,9 @@ object DianaScorer extends CLIApplication {
 	var pScoreFunc:Carrier => Double = c => c.fragmentRankPcsRatioProb
 	var nIsotopes				= 0
 	
-	var quiet 			= true
-	var noBar			= false
+	var quiet 		= true
+	var noBar		= false
+	var cliBar		= new CLIBar(30, true)
 	//var singleResult 	= true
 	
 	
@@ -135,10 +137,10 @@ object DianaScorer extends CLIApplication {
 				},
 				"X")
 		
-		opt("no-bar", 
+		/*opt("no-bar", 
 				"don't print process bar", 
 				s => noBar = true)
-		/*
+		
 		opt("edges", 
 				"edge find strategy to use: strict, L1 och L2 (default: strict)", 
 				s => {
@@ -198,10 +200,10 @@ object DianaScorer extends CLIApplication {
 					outEsv = false
 				})
 		
-		opt("no-xml", 
-				"flag if xml output it not wanted", 
+		opt("xml", 
+				"flag if xml output is wanted", 
 				s => {
-					outXml = false
+					outXml = true
 				})
 		
 				/*
@@ -494,44 +496,47 @@ object DianaScorer extends CLIApplication {
 		}
 		*/
 		var pcCount 	= 0
-		var barCount 	= 0
 		val nPcs 		= ref.precursors.length
-		if (!noBar) {
-			println("|                    |")
-			print("|")
+		cliBar.reset
+		if (quiet) {
+			println(cliBar.reference)
+			print(cliBar.update(0))
 		}
 		
 		ref.precursors.map(pc => {
-			if (!noBar) {
+			if (quiet) {
 				pcCount += 1
-				if (barCount < 20 && (20*pcCount) / nPcs > barCount) {
-					print("=")
-					barCount += 1
-				}
+				print(cliBar.update(pcCount, nPcs))
 			}
 			try {
 	        	xmzML.grouper.extractGroup(pc.mz) match {
 	            	case Some(cg) => {
+	            		val aIn = AnubisInput.of(cg, pc, new AnubisParams)
+	            		
 	            		var iAIn =
 	            			if (nIsotopes > 1)
-	            				Some(getIsotopeInput(xmzML, pc))
+	            				getIsotopeInput(xmzML, pc, aIn.cg.chromatograms.head.times)
 	            			else None
 	            		
-	            		val aIn = AnubisInput.of(cg, pc, new AnubisParams)
 	            		val carriers = AnalyzeCG(aIn, iAIn, pc)
 	            		if (carriers.isEmpty) List(new SwathPeptideCandidate(pc))
 	            		else carriers.map(c => SwathPeptideCandidate(pc, aIn.cg, iAIn.map(_.cg), c, pScoreFunc, carriers.length))
 	            	}
 	            	case None => {
-	            		//TODO: error handling
+	            		CLIApplication.log.write("%s %.3f not found in '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString))
 	            		List(new SwathPeptideCandidate(pc))
 	            	}
 	            }
 	        }
 	        catch {
 	        	case e:Exception => {
-	            	//TODO: error handling
-	        		e.printStackTrace
+	        		val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString)
+	        		CLIApplication.log.write(errMsg)
+	            	CLIApplication.log.write(e)
+	            	if (!quiet) {
+	            		println(errMsg)
+	            		e.printStackTrace
+	            	}
 	        		List(new SwathPeptideCandidate(pc))
 	        	}
 	        }
@@ -540,7 +545,7 @@ object DianaScorer extends CLIApplication {
 	
 	
 	
-	def getIsotopeInput(xmzML:XMzML, pc:ReferencePrecursor):AnubisInput = {
+	def getIsotopeInput(xmzML:XMzML, pc:ReferencePrecursor, times:Seq[Double]):Option[AnubisInput] = {
 		val seq 	= pc.peptideSequence
 		val p 		= UniMod.parseUniModSequence(seq)
 		val q1		= pc.mz
@@ -560,7 +565,9 @@ object DianaScorer extends CLIApplication {
 			}
 		}).filter(_.isDefined).map(_.get)
 		
-		if (isotopeChroms.isEmpty) return null
+		if (isotopeChroms.isEmpty || isotopeChroms.forall(_._2.intensities.max == 0)) 
+			return None
+		
 		val cg = new XChromatogramGroup
 		for (ic <- isotopeChroms)
 			cg.chromatograms += ic._2
@@ -570,11 +577,17 @@ object DianaScorer extends CLIApplication {
 			r += new Ratio(ui, di, isotopeChroms(ui)._1.occurence / isotopeChroms(di)._1.occurence, -1.0)
 		})
 		
-		return new AnubisInput(seq, q1, cg, isotopeChroms.map(ic => {
+		return Some(new AnubisInput(
+				seq, 
+				q1, 
+				cg.resample(times), 
+				isotopeChroms.map(ic => {
 						val mz = ic._1.q1
 						AnubisInput.Fragment(mz, "isotope %.2f".formatLocal(Locale.UK, mz))
 					}), 
-					r.toArray, new AnubisParams)
+				r.toArray, 
+				new AnubisParams
+			))
 	}
 	
 	
