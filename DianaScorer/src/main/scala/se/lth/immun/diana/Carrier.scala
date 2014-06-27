@@ -1,10 +1,10 @@
 package se.lth.immun.diana
 
 import se.lth.immun.anubis.ReferencePrecursor
-import SwathPeakCandidate._
+import DianaPeakCandidate._
 
 class Carrier(
-		var rpc:ReferencePrecursor,
+		var assay:DianaAssay,
 		var g:PCGroup,
 		nFragments:Int,
 		nIsotopes:Int

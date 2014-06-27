@@ -18,17 +18,18 @@ import java.util.Date
 import java.util.Locale
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.HashMap
 
 import se.lth.immun.mzml._
 import se.lth.immun.mzml.ghost._
 import se.lth.immun.traml.ghost._
 
-import se.lth.immun.anubis.Ratio
-import se.lth.immun.anubis.AnubisInput
-import se.lth.immun.anubis.ReferenceFile
-import se.lth.immun.anubis.ReferencePrecursor
-import se.lth.immun.anubis.ReferenceTransition
-import se.lth.immun.anubis.AnubisParams
+//import se.lth.immun.anubis.Ratio
+//import se.lth.immun.anubis.AnubisInput
+//import se.lth.immun.anubis.ReferenceFile
+//import se.lth.immun.anubis.ReferencePrecursor
+//import se.lth.immun.anubis.ReferenceTransition
+//import se.lth.immun.anubis.AnubisParams
 import se.lth.immun.anubis.ResultFile
 import se.lth.immun.anubis.ResultParameter
 import se.lth.immun.anubis.ResultMzMLFile
@@ -38,7 +39,7 @@ import se.lth.immun.anubis.ResultTransition
 import se.lth.immun.anubis.ResultRetentionTime
 import se.lth.immun.anubis.ResultQuality
 
-import SwathPeakCandidate._
+import DianaPeakCandidate._
 
 import se.lth.immun.math.Ratios
 
@@ -55,23 +56,15 @@ object DianaScorer extends CLIApplication {
 	
 	
 	// real
-	var swathFile:File 			= null
-	var tramlFile:File 			= null
-	var ref:ReferenceFile		= null
-	var swathXmzML:XMzML		= null
-	var outFile:File			= null
+	var swathFile:File 			= _
+	var tramlFile:File 			= _
+	var traml:GhostTraML		= _
+	//	var ref:ReferenceFile		= null
+	var swathGmzML:GhostMzML	= _
+	var outFile:File			= _
 	var outEsv					= true
 	var outXml					= false
-	// decoy
-	/*
-	var decoySwathFile:File 	= null
-	var decoyTramlFile:File 	= null
-	var decoyRef:ReferenceFile	= null
-	var decoyXmzML:XMzML		= null
-	var decoyEsvFile:File		= null
-	var decoyEsv:EsvReader		= null
-	var decoyPValues:Seq[Double] = Nil
-		*/
+	
 	var noDecoys				= true
 
 	// swath analysis
@@ -109,15 +102,19 @@ object DianaScorer extends CLIApplication {
 			tramlFile = new File(s)
 			val ext = s.split('.').last.toLowerCase
 			if (ext == "traml")
-				ref = ReferenceFile.fromTraML(new XmlReader(
+				traml = GhostTraML.fromFile(new XmlReader(
+												new BufferedReader(new FileReader(tramlFile))
+											))
+			/*	ref = ReferenceFile.fromTraML(new XmlReader(
 												new BufferedReader(new FileReader(tramlFile))
 											))
 			else if (ext == "ref" || ext == "xml")
 				ref = ReferenceFile.fromFile(new XmlReader(
 												new BufferedReader(new FileReader(tramlFile))
 											))
+			*/
 			else {
-				val s = "Unkown traml extention '%s'. Need .traml, .ref och .xml".format(ext)
+				val s = "Unkown traml extention '%s'. Need .traml".format(ext) //, .ref och .xml".format(ext)
 				println(s)
 				throw new IllegalArgumentException(s)
 			}
@@ -152,35 +149,6 @@ object DianaScorer extends CLIApplication {
 				},
 				"strict|L1|L2")
 		*/
-				/*
-		opt("rt-prob", 
-				"file w. expected empirical linear rt model vs reference (default: rtProb = 0)", 
-				s => {
-					var r = new BufferedReader(new FileReader(new File(s)))
-					r.readLine
-					val t = r.readLine.split(" ")
-					AnalyzeCG.fragmentState.rtIntersect = t(0).toDouble
-					AnalyzeCG.fragmentState.rtSlope 	= t(1).toDouble
-					AnalyzeCG.fragmentState.rtStd 		= t(2).toDouble
-				},
-				"RT_FILE")
-		
-		opt("p-score", 
-				"file w. linear model for computing p-score (default: p-score = nullRatioProb)", 
-				s => {
-					var r = new BufferedReader(new FileReader(new File(s)))
-					r.readLine
-					val t = r.readLine.split(" ")
-					val intercept 	= t(0).toDouble
-					val rtK 		= t(1).toDouble
-					val ratioK 		= t(2).toDouble
-					val fragK 		= t(3).toDouble
-					val corrK 		= t(4).toDouble
-					pScoreFunc = g => 
-						intercept + g.rtProb*rtK + g.fragmentRatioProb*ratioK + g.pEstimates*fragK + g.fragmentCorrScore*corrK
-				},
-				"P_SCORE_FILE")
-		*/
 		opt("verbose", 
 				"(default: not verbose)", 
 				s => {
@@ -207,37 +175,11 @@ object DianaScorer extends CLIApplication {
 				})
 		
 				/*
-		opt("decoy-traml", 
-				"Traml with decoy transitions, also need --decoy-mzml with the corresponding data", 
-				s => {
-					decoyTramlFile = new File(s)
-					decoyRef = ReferenceFile.fromTraML(new XmlReader(
-											new BufferedReader(new FileReader(decoyTramlFile))
-										))
-				},
-				"TRAML"
-		)
 		
-		opt("decoy-mzml", 
-				"Mzml with decoy data, also need --decoy-traml with the corresponding transitions", 
-				s => {
-					decoySwathFile = new File(s)
-				},
-				"MZML"
-		)
-		
-		opt("decoy-esv", 
-				"esv with decoy data, here the p-values are precalculated", 
-				s => {
-					decoyEsvFile = new File(s)
-					decoyEsv = new EsvReader(new BufferedReader(new FileReader(decoyEsvFile)))
-				},
-				"ESV"
-		)
-		*/
 		opt("isotopes", 
 				"The number highest precursor isotopes to analyze (default 0)", 
 				s => nIsotopes = s.toInt, "X")
+		*/
 		
 		val before 		= System.currentTimeMillis
     	val name 		= properties.getProperty("pom.name")
@@ -260,24 +202,7 @@ object DianaScorer extends CLIApplication {
 			}
 		}
 
-		
-		/*
-		if (decoyEsv != null) {
-			if (decoyTramlFile != null || decoySwathFile != null)
-				return println("Argument error: both decoy-esv and one or both of decoy-mzml and decoy-traml set. "+
-							"Use only decoy-esv or both of decoy-mzml and decoy-traml. Exiting.")
-			noDecoys = false
-		} else {
-			if (decoyTramlFile != null && decoySwathFile == null)
-				return println("Argument error: decoy-traml set but not decoy-mzml. "+
-								"Need both for decoy handling. Exiting.")
-			if (decoyTramlFile == null && decoySwathFile != null)
-				return println("Argument error: decoy-mzml set but not decoy-traml. "+
-								"Need both for decoy handling. Exiting.")
-			if (decoyTramlFile != null && decoySwathFile != null)
-				noDecoys = false
-		}
-			*/				
+					
 							
 		println(name + " "+version)
     	println("  swath mzML file: " + swathFile)
@@ -289,65 +214,29 @@ object DianaScorer extends CLIApplication {
     	println()
 		
 		var qvalues:Seq[(Double, Double)] = Nil
-    	var pcgroups = analyzeFile(swathFile, ref, false)
+    	var pcgroups = analyzeFile(swathFile, traml, false)
     					.map(_.sortBy(_.pscore))
     					.sortBy(_.head.pscore)
     		/*
     	if (singleResult)
     		pcgroups = pcgroups.map(_.headOption.toSeq)
 		
-		if (!noDecoys) {
-    		if (decoyEsv != null) {
-    			var a = new ArrayBuffer[Double]
-    			while (!decoyEsv.EOF) {
-    				a += decoyEsv.getValue("p-score").toDouble
-    				decoyEsv.readLine
-    			}
-    			decoyEsv.close
-    			decoyPValues = a
-    		} else {
-    			decoyPValues = analyzeFile(decoySwathFile, decoyRef, true)
-    				.map(_.map(_.pscore).min).sorted
-    		}
-    		
-    		if (!quiet) {
-    			println("     REAL: "+pcgroups.map(c => "%.4f".format(c.head.pscore)))
-    			println("    DECOY: "+decoyPValues.map(pscore => "%.4f".format(pscore)))
-    		}
-    		qvalues = calculateQvalues(pcgroups, decoyPValues)
-    					.map(x => (x.head.pscore, x.head.qvalue))
-    		
-    		if (!quiet)
-    			println(" Q-VALUES: "+qvalues.map(t => 
-    								"%.4f".format(t._2)
-    							).mkString(" "))
-    	}
 		*/
 		val analysisTime = System.currentTimeMillis - before
-		if (outXml) {
+		/*if (outXml) {
 			var res = new ResultFile(Array(),
-					Array(new ResultMzMLFile(swathFile, swathXmzML.runTime)))
-			/*
-			var res = new ResultFile(
-					if (noDecoys) Array()
-					else if (decoyEsvFile != null)
-						Array(new ResultParameter("decoy esv file", decoyEsvFile.toString))
-					else Array(
-						new ResultParameter("decoy mzML file", decoySwathFile.toString),
-						new ResultParameter("decoy traML file", decoyTramlFile.toString)
-					),
-					Array(new ResultMzMLFile(swathFile, swathXmzML.runTime))
-				)
-	    	*/
+					Array(new ResultMzMLFile(swathFile, swathGmzML.runTime)))
+			
 			res.referenceFile = tramlFile
 			res.workingDir = new File(".")
 			
 			//println("Q1 pval qval area rt")
-			res.precursors = pcgroups.flatten.map(spc => {
-				val rp = spc.reference
+			res.precursors = pcgroups.flatten.map(dpc => {
+				val assay = dpc.assay
+				
 				//println("%6.1f %10.4e %10.4e %10.0f %4.1f".format(rp.mz, spc.pvalue, spc.qvalue, spc.area, spc.rtApex))
 				new ResultPrecursor(
-					rp.mz,
+					assay.transitions.head.q1,
 					rp.proteinName,
 					rp.peptideSequence,
 					Array(
@@ -383,7 +272,7 @@ object DianaScorer extends CLIApplication {
 						new File(outFile.toString + ".xml")
 					))))
 		}
-		
+		*/
 		if (outEsv) {
 			var esv = new Esv
 			esv.separator = '\t'
@@ -437,39 +326,47 @@ object DianaScorer extends CLIApplication {
 			var ew = new EsvWriter(esv, bw)
 			
 			val uk = Locale.UK
-			for (spc <- pcgroups.flatten) 
+			for (dpc <- pcgroups.flatten) {
+				val (pep, prot) = 
+					if (traml.peptides.contains(dpc.assay.pepCompRef)) {
+						val pep = traml.peptides(dpc.assay.pepCompRef)
+						(pep.sequence, pep.proteins.mkString)
+					} else {
+						(dpc.assay.pepCompRef, "-")
+					}
 				ew.write(List(
-						"%10.1f".formatLocal(uk, spc.rawArea), 
-						"%10.1f".formatLocal(uk, spc.correctedArea), 
-						"%10.1f".formatLocal(uk, spc.isotopeArea), 
-						"%.2e".formatLocal(uk, spc.rtProb), 
+						"%10.1f".formatLocal(uk, dpc.rawArea), 
+						"%10.1f".formatLocal(uk, dpc.correctedArea), 
+						"%10.1f".formatLocal(uk, dpc.isotopeArea), 
+						"%.2e".formatLocal(uk, dpc.rtProb), 
 						
-						"%.2e".formatLocal(uk, spc.fragmentRankAllRatioProb), 
-						"%.2e".formatLocal(uk, spc.fragmentRankPcsRatioProb), 
-						"%.2e".formatLocal(uk, spc.fragmentMarkovAllRatioProb), 
-						"%.2e".formatLocal(uk, spc.fragmentMarkovPcsRatioProb), 
-						"%.4f".formatLocal(uk, spc.fragmentCorrScore), 
+						"%.2e".formatLocal(uk, dpc.fragmentRankAllRatioProb), 
+						"%.2e".formatLocal(uk, dpc.fragmentRankPcsRatioProb), 
+						"%.2e".formatLocal(uk, dpc.fragmentMarkovAllRatioProb), 
+						"%.2e".formatLocal(uk, dpc.fragmentMarkovPcsRatioProb), 
+						"%.4f".formatLocal(uk, dpc.fragmentCorrScore), 
 						
-						"%.2e".formatLocal(uk, spc.isotopeRankAllRatioProb),
-						"%.2e".formatLocal(uk, spc.isotopeRankPcsRatioProb),
-						"%.2e".formatLocal(uk, spc.isotopeMarkovAllRatioProb),
-						"%.2e".formatLocal(uk, spc.isotopeMarkovPcsRatioProb),
-						"%.4f".formatLocal(uk, spc.isotopeCorrScore), 
+						"%.2e".formatLocal(uk, dpc.isotopeRankAllRatioProb),
+						"%.2e".formatLocal(uk, dpc.isotopeRankPcsRatioProb),
+						"%.2e".formatLocal(uk, dpc.isotopeMarkovAllRatioProb),
+						"%.2e".formatLocal(uk, dpc.isotopeMarkovPcsRatioProb),
+						"%.4f".formatLocal(uk, dpc.isotopeCorrScore), 
 						
-						"%.2e".formatLocal(uk, spc.pscore), 
-						"%.2e".formatLocal(uk, spc.qvalue), 
-						"%.1f".formatLocal(uk, spc.rtStart), 
-						"%.1f".formatLocal(uk, spc.rtApex), 
-						"%.1f".formatLocal(uk, spc.rtEnd), 
-						"%5.1f".formatLocal(uk, spc.reference.retentionTime.peak),
-						"%.2f".formatLocal(uk, spc.reference.mz),
-						spc.reference.charge,
-						"%.1f".formatLocal(uk, spc.maxIntensity),
-						"%.1f".formatLocal(uk, spc.maxEstimate),
-						spc.alternatives,
-						spc.reference.proteinName, 
-						spc.reference.peptideSequence
+						"%.2e".formatLocal(uk, dpc.pscore), 
+						"%.2e".formatLocal(uk, dpc.qvalue), 
+						"%.1f".formatLocal(uk, dpc.rtStart), 
+						"%.1f".formatLocal(uk, dpc.rtApex), 
+						"%.1f".formatLocal(uk, dpc.rtEnd), 
+						"%5.1f".formatLocal(uk, dpc.assay.expectedRT),
+						"%.2f".formatLocal(uk, dpc.assay.transitions.head.q1),
+						dpc.assay.pepCompCharge,
+						"%.1f".formatLocal(uk, dpc.maxIntensity),
+						"%.1f".formatLocal(uk, dpc.maxEstimate),
+						dpc.alternatives,
+						pep, 
+						prot
 						))
+			}
 			
 			ew.close
 		}
@@ -483,68 +380,160 @@ object DianaScorer extends CLIApplication {
 	
 	def analyzeFile(
 			mzmlFile:File,
-			ref:ReferenceFile,
+			traml:GhostTraML,
 			decoy:Boolean
-	):Seq[Seq[SwathPeptideCandidate]] = {
-		val (reader, binFile, binFileChannel) = XMzML.getReaders(mzmlFile)
-		var xmzML = XMzML.fromFile(reader, true, binFileChannel)
-		swathXmzML = xmzML
-		/*if (decoy) {
-			decoyXmzML = xmzML
-		} else {
-			swathXmzML = xmzML
-		}
-		*/
-		var pcCount 	= 0
-		val nPcs 		= ref.precursors.length
+	):Seq[Seq[DianaPeptideCandidate]] = {
+		val (reader, binFile, binFileChannel) = GhostMzML.getReaders(mzmlFile)
+		var gmzML = GhostMzML.fromFile(reader, true, binFileChannel)
+		swathGmzML = gmzML
+		
+		val assays = getAssays(traml)
+		
+		var aCount 	= 0
+		val nAssays 	= assays.length
 		cliBar.reset
 		if (quiet) {
 			println(cliBar.reference)
 			print(cliBar.update(0))
 		}
 		
-		ref.precursors.map(pc => {
+		assays.map(assay => {
 			if (quiet) {
-				pcCount += 1
-				print(cliBar.update(pcCount, nPcs))
+				aCount += 1
+				print(cliBar.update(aCount, nAssays))
 			}
-			try {
-	        	xmzML.grouper.extractGroup(pc.mz) match {
-	            	case Some(cg) => {
-	            		val aIn = AnubisInput.of(cg, pc, new AnubisParams)
-	            		
-	            		var iAIn =
-	            			if (nIsotopes > 1)
-	            				getIsotopeInput(xmzML, pc, aIn.cg.chromatograms.head.times)
-	            			else None
-	            		
-	            		val carriers = AnalyzeCG(aIn, iAIn, pc)
-	            		if (carriers.isEmpty) List(new SwathPeptideCandidate(pc))
-	            		else carriers.map(c => SwathPeptideCandidate(pc, aIn.cg, iAIn.map(_.cg), c, pScoreFunc, carriers.length))
-	            	}
-	            	case None => {
-	            		CLIApplication.log.write("%s %.3f not found in '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString))
-	            		List(new SwathPeptideCandidate(pc))
-	            	}
-	            }
-	        }
-	        catch {
-	        	case e:Exception => {
-	        		val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString)
-	        		CLIApplication.log.write(errMsg)
-	            	CLIApplication.log.write(e)
-	            	if (!quiet) {
-	            		println(errMsg)
-	            		e.printStackTrace
-	            	}
-	        		List(new SwathPeptideCandidate(pc))
-	        	}
-	        }
+			val transChroms = assay.transitions.map(t => gmzML.chromatograms.find(_.id == t.id))
+			val targChroms = assay.targets.map(t => gmzML.chromatograms.find(_.id == t.id))
+			
+			if (transChroms.count(_.isDefined) < 2) {
+				val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(assay.pepCompRef, assay.pepCompMz, mzmlFile.toString)
+        		CLIApplication.log.write(errMsg)
+            	if (!quiet) 
+            		println(errMsg)
+            	List() //List(new DianaPeptideCandidate(pc))
+			} else {
+				
+				val dIn = DianaInput.fromTransitions(transChroms.map(_.get.toXChromatogram), assay)
+				
+				val iDIn =
+					if (targChroms.nonEmpty)
+						Some(DianaInput.fromTargets(
+								targChroms.map(_.get.toXChromatogram), 
+								assay, dIn.cg.chromatograms.head.times
+							))
+					else None
+					
+				val carriers = AnalyzeCG(dIn, iDIn, assay)
+				if (carriers.isEmpty) List(new DianaPeptideCandidate(assay))
+		        else carriers.map(c => DianaPeptideCandidate(assay, dIn.cg, iDIn.map(_.cg), c, pScoreFunc, carriers.length))
+		       /* 
+				try {
+		        	xmzML.grouper.extractGroup(pc.mz) match {
+		            	case Some(cg) => {
+		            		val aIn = AnubisInput.of(cg, pc, new AnubisParams)
+		            		
+		            		var iAIn =
+		            			if (nIsotopes > 1)
+		            				getIsotopeInput(xmzML, pc, aIn.cg.chromatograms.head.times)
+		            			else None
+		            		
+		            		val carriers = AnalyzeCG(aIn, iAIn, pc)
+		            		if (carriers.isEmpty) List(new DianaPeptideCandidate(pc))
+		            		else carriers.map(c => DianaPeptideCandidate(pc, aIn.cg, iAIn.map(_.cg), c, pScoreFunc, carriers.length))
+		            	}
+		            	case None => {
+		            		CLIApplication.log.write("%s %.3f not found in '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString))
+		            		List(new DianaPeptideCandidate(pc))
+		            	}
+		            }
+		        }
+		        catch {
+		        	case e:Exception => {
+		        		val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString)
+		        		CLIApplication.log.write(errMsg)
+		            	CLIApplication.log.write(e)
+		            	if (!quiet) {
+		            		println(errMsg)
+		            		e.printStackTrace
+		            	}
+		        		List(new DianaPeptideCandidate(pc))
+		        	}
+		        }*/
+			}
 		})
 	}
 	
 	
 	
+	def getAssays(traml:GhostTraML):Seq[DianaAssay] = {
+		
+		val pcBuff = new HashMap[(String, Int), (Double, ArrayBuffer[GhostTransition], ArrayBuffer[GhostTarget])]
+		for (t <- traml.transitions) {
+			val z = 
+				if (t.q1z != 0) t.q1z
+				else if (traml.peptides.contains(t.peptideRef)) {
+					import PeptideParser._
+					val seq = traml.peptides(t.peptideRef).sequence
+					PeptideParser.parseSequence(seq) match {
+						case UniModPeptide(p) => math.round(p.monoisotopicMass() / t.q1).toInt
+						case Unparsable(seq) => 
+							val errMsg = "WARN: could parse peptide '%s' for mass calculation".format(seq)
+							CLIApplication.log.write(errMsg)
+							if (!quiet) 
+								println(errMsg)
+							0
+					}
+				} else {
+					val errMsg = "WARN: no charge given for compound '%s' with mz %.3f".format(t.compoundRef, t.q1)
+					CLIApplication.log.write(errMsg)
+					if (!quiet) 
+						println(errMsg)
+					0
+				}
+			val key = (if (t.peptideRef != null) t.peptideRef else t.compoundRef, z)
+			if (!pcBuff.contains(key))
+				pcBuff += key -> (t.q1, new ArrayBuffer, new ArrayBuffer)
+			pcBuff(key)._2 += t
+		}
+		for (t <- traml.includes) {
+			val z = 
+				if (t.q1z != 0) t.q1z
+				else if (traml.peptides.contains(t.peptideRef)) {
+					import PeptideParser._
+					val seq = traml.peptides(t.peptideRef).sequence
+					PeptideParser.parseSequence(seq) match {
+						case UniModPeptide(p) => math.round(p.monoisotopicMass() / t.q1).toInt
+						case Unparsable(seq) => 
+							val errMsg = "WARN: could parse peptide '%s' for mass calculation".format(seq)
+							CLIApplication.log.write(errMsg)
+							if (!quiet) 
+								println(errMsg)
+							0
+					}
+				} else {
+					val errMsg = "WARN: no charge given for compound '%s' with mz %.3f".format(t.compoundRef, t.q1)
+					CLIApplication.log.write(errMsg)
+					if (!quiet) 
+						println(errMsg)
+					0
+				}
+			val key = (if (t.peptideRef != null) t.peptideRef else t.compoundRef, z)
+			if (!pcBuff.contains(key))
+				pcBuff += key -> (t.q1, new ArrayBuffer, new ArrayBuffer)
+			pcBuff(key)._3 += t
+		}
+		
+		pcBuff.toSeq.map(kv => {
+			val ((ref, z), (tmz, trans, targs)) = kv
+			
+			
+			val expectedRT = trans.map(t => (t.rtEnd + t.rtStart)/2).sum / trans.length
+			new DianaAssay(ref, tmz, z, expectedRT, trans, targs)
+		})
+	}
+	
+	
+	/*
 	def getIsotopeInput(xmzML:XMzML, pc:ReferencePrecursor, times:Seq[Double]):Option[AnubisInput] = {
 		val seq 	= pc.peptideSequence
 		val p 		= UniMod.parseUniModSequence(seq)
@@ -590,7 +579,7 @@ object DianaScorer extends CLIApplication {
 			))
 	}
 	
-	
+	*/
 	
 	
 	
@@ -599,9 +588,9 @@ object DianaScorer extends CLIApplication {
 	
 	/*
 	def calculateQvalues(
-			groups:Seq[Seq[SwathPeptideCandidate]], 
+			groups:Seq[Seq[DianaPeptideCandidate]], 
 			decoys:Seq[Double]
-	):Seq[Seq[SwathPeptideCandidate]] = {
+	):Seq[Seq[DianaPeptideCandidate]] = {
 		var ig = 0
 		var id = 0
 		var gdratio = groups.length.toDouble / decoys.length

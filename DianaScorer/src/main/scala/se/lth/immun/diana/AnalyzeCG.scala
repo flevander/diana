@@ -1,8 +1,10 @@
 package se.lth.immun.diana
 
+/*
 import se.lth.immun.anubis.Ratio
 import se.lth.immun.anubis.AnubisInput
 import se.lth.immun.anubis.ReferencePrecursor
+*/
 import se.lth.immun.math.Ratios
 import se.lth.immun.signal.Filter
 
@@ -10,30 +12,30 @@ import se.lth.immun.mzml.ghost.XChromatogram
 
 object AnalyzeCG {
 	
-	import SwathPeakCandidate._
-	import SwathSignalProcessor._
+	import DianaPeakCandidate._
+	import DianaSignalProcessor._
 
 
 	var pValueCutoff 	= 0.99
-	val signalP 		= SwathSignalProcessor.getDefault
+	val signalP 		= DianaSignalProcessor.getDefault
 	
-	val fragmentState 		= new SwathChromatogramState(1.5)
-	val fragmentEvaluator 	= new SwathPCEvaluator(fragmentState)
+	val fragmentState 		= new DianaChromatogramState(1.5)
+	val fragmentEvaluator 	= new DianaPCEvaluator(fragmentState)
 	var findEdges			= fragmentEvaluator.findEdges _
 	
-	val isotopeState 		= new SwathChromatogramState(1.5)
-	val isotopeEvaluator 	= new SwathPCEvaluator(isotopeState)
+	val isotopeState 		= new DianaChromatogramState(1.5)
+	val isotopeEvaluator 	= new DianaPCEvaluator(isotopeState)
 	
 	val carrierAreaCutoff 	= 25.0
 
 	
 	
-	def apply(aIn:AnubisInput, iAIn:Option[AnubisInput], pc:ReferencePrecursor):Seq[Carrier] = {
+	def apply(dIn:DianaInput, iDIn:Option[DianaInput], assay:DianaAssay):Seq[Carrier] = {
 		
 		val before 		= System.currentTimeMillis
 		
-		val fChroms = aIn.cg.chromatograms
-		val iChroms:Seq[XChromatogram] = iAIn match {
+		val fChroms = dIn.cg.chromatograms
+		val iChroms:Seq[XChromatogram] = iDIn match {
 			case Some(x) => x.cg.chromatograms 
 			case None => Nil
 		}
@@ -41,11 +43,11 @@ object AnalyzeCG {
 		val allChroms 	= fChroms ++ iChroms
 		if (allChroms.isEmpty) return Nil 
 			
-		def getPCs(y:SwathSignalProcessor.SmoothAndBase) = {	
+		def getPCs(y:DianaSignalProcessor.SmoothAndBase) = {	
 			var dy 		= signalP.getDerivate(y.smooth)
 			var ddy		= signalP.getDerivate(dy)
 			
-			SwathPeakCandidate.findPCs(y.smooth, dy, ddy, y.base)
+			DianaPeakCandidate.findPCs(y.smooth, dy, ddy, y.base)
 		}
 		
 		def nonRetarded(c:Carrier) = {
@@ -58,21 +60,21 @@ object AnalyzeCG {
 		}
 		val smooths		= allChroms.map(xc => signalP.getSmoothAndBase(xc.intensities.toArray))
 		val pcs 		= smooths.map(xc => getPCs(xc))
-		val carriers	= SwathPeakCandidate.groupPCs(pcs, findEdges)
-							.map(g => new Carrier(pc, g, fChroms.length, iChroms.length))
+		val carriers	= DianaPeakCandidate.groupPCs(pcs, findEdges)
+							.map(g => new Carrier(assay, g, fChroms.length, iChroms.length))
 							.filter(nonRetarded)
 		
 		
-		val filteredCarriers = calculateFragmentScores(aIn, smooths, pc, carriers)
-		if (iAIn.nonEmpty)
-			calculateIsotopeScores(iAIn.get, pc, filteredCarriers)
+		val filteredCarriers = calculateFragmentScores(dIn, smooths, assay, carriers)
+		if (iDIn.nonEmpty)
+			calculateIsotopeScores(iDIn.get, assay, filteredCarriers)
 		
 		for (c <- filteredCarriers)
 			c.rtProb = fragmentState.rtProb(c.fragmentEstimation.iEstimateApex)
 		
 		if (!DianaScorer.quiet)
-			println("%7.2f\t%4d ms\t%s".format(pc.mz, 
-				System.currentTimeMillis-before, pc.peptideSequence))
+			println("%4d ms\t+%d\t%s".format(System.currentTimeMillis-before, 
+					assay.pepCompCharge, assay.pepCompRef))
 		
 		return filteredCarriers
 	}
@@ -80,12 +82,12 @@ object AnalyzeCG {
 	
 	
 	def calculateFragmentScores(
-			aIn:AnubisInput, 
+			dIn:DianaInput, 
 			smooths:Seq[SmoothAndBase],
-			pc:ReferencePrecursor, 
+			assay:DianaAssay, 
 			carriers:Seq[Carrier]
 	) = {
-		val chroms 	= aIn.cg.chromatograms
+		val chroms 	= dIn.cg.chromatograms
 		val l 		= chroms.length
 		val t 		= chroms(0).times.toArray
 		
@@ -97,8 +99,8 @@ object AnalyzeCG {
 		fragmentState.setChromatogram(
 				l, 
 				ratios, 
-				ratios.getTargetRatioTable(Ratio.ONE)(aIn.refRatios, Ratio.INVERSE),
-				pc.retentionTime.peak,
+				ratios.getTargetRatioTable(DianaInput.IDENTITY_RATIO)(dIn.refRatios.toArray, DianaInput.inverseRatio),
+				assay.expectedRT,
 				t
 			)
 		
@@ -145,11 +147,11 @@ object AnalyzeCG {
 	
 	
 	def calculateIsotopeScores(
-			aIn:AnubisInput, 
-			pc:ReferencePrecursor, 
+			dIn:DianaInput, 
+			assay:DianaAssay, 
 			carriers:Seq[Carrier]
 	) = {
-		val chroms 	= aIn.cg.chromatograms
+		val chroms 	= dIn.cg.chromatograms
 		val l 		= chroms.length
 		val t 		= chroms(0).times.toArray
 		val smooths	= chroms.map(xc => signalP.getSmoothAndBase(xc.intensities.toArray))
@@ -162,8 +164,8 @@ object AnalyzeCG {
 		isotopeState.setChromatogram(
 				l, 
 				ratios, 
-				ratios.getTargetRatioTable(Ratio.ONE)(aIn.refRatios, Ratio.INVERSE),
-				pc.retentionTime.peak,
+				ratios.getTargetRatioTable(DianaInput.IDENTITY_RATIO)(dIn.refRatios.toArray, DianaInput.inverseRatio),
+				assay.expectedRT,
 				t
 			)
 		
