@@ -4,6 +4,8 @@ import numpy
 import scipy
 import scipy.stats
 import scipy.optimize
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 from pandas import *
 import matplotlib.mlab as mlab
@@ -20,7 +22,7 @@ def calculateQvalues(real, decoy):
 	ireal 	= 0
 	idecoy 	= 0
 	rit = r.iterrows()
-	dit = d.iteritems()
+	dit = iter(d.iteritems())
 	ixr, xr = rit.next()
 	ixd, xd = dit.next()
 	gdratio = float(len(r)) / len(d)
@@ -56,7 +58,7 @@ def calculateQvalues(real, decoy):
 	return real
 	
 
-def findIRtModel(df, outBase):
+def findIRtModel(df, outBase, minPeps):
 	def fitAndPlot(x, y, iter):
 		p = numpy.polyfit(x, y, 1)
 		def fit(x):
@@ -73,24 +75,26 @@ def findIRtModel(df, outBase):
 			plt.title(title)
 			plt.plot(lrx, fit(lrx), 'k-', x, y, 'bo', alpha=0.2, lw=3)#; plt.show()
 			if outBase != "":
-				fig.savefig("%s_round%d_irt_mapping.png" % (outBase, iter))
-		except:
-			pass
+                                figPath = "%s_round%d_irt_mapping.png" % (outBase, iter)
+                                #print "figPath:", figPath
+				fig.savefig(figPath)
+		except Exception as e:
+			print "error drawing figure:", e
 		
-		return p
+		return (p, corr*corr)
 	
 	
 	ok 	= df[df['q-value'] < 0.05]
 	print " iter    n       corr2     slope    intersect"
-	if len(ok) < 10:
-		return {"intercept":0, "slope":0, "std":0}
+	if len(ok) < minPeps:
+		return {"intercept":0, "slope":0, "std":0, "n":len(ok), "corr2":0}
 	
-	p 	= fitAndPlot(ok['rtApex'], ok['rtApexAssay'], 1)
+	p, c2 	= fitAndPlot(ok['rtApex'], ok['rtApexAssay'], 1)
 	dt 	= ok['rtApexAssay'] - (p[0]*ok['rtApex'] + p[1])
 	
 	ok2 	= ok[numpy.abs(dt - dt.mean()) < 2*dt.std()]
 	
-	p 	= fitAndPlot(ok2['rtApex'], ok2['rtApexAssay'], 2)
+	p, c2 	= fitAndPlot(ok2['rtApex'], ok2['rtApexAssay'], 2)
 	dt 	= ok['rtApexAssay'] - (p[0]*ok['rtApex'] + p[1])
 	
 	dt.index = range(dt.size)
@@ -121,40 +125,77 @@ def findIRtModel(df, outBase):
 	except:
 		pass
 	
-	return {"intercept":norm[0] + p[-1], "slope":p[-2], "std":norm[1]}
+	return {"intercept":norm[0] + p[-1], "slope":p[-2], "std":norm[1], "n":len(ok), "corr2":c2}
 
 
-if len(sys.argv) < 3:
-	print "irtMap.py real.csv decoy.csv [outFile]"
-	exit(1)
+
+
+
+
+usage = """usage:
+> irtMap.py [--diana-dir=X] [--min-peps=X(def 5)] real.csv decoy.csv [outFile]"""
 
 outFile = ""
-if len(sys.argv) == 4:
-	outFile = sys.argv[3]
+minPeps = 5
 
-realFile 	= sys.argv[1]
-decoyFile 	= sys.argv[2]
+def readArgs(args):
+	if args[0].lower().startswith("--diana-dir="):
+		readArgs(args[1:])
+	elif args[0].lower().startswith("--min-peps="):
+		global minPeps
+		minPeps = int(args[0].split("=")[1])
+		readArgs(args[1:])
+	elif len(args) < 2:
+		print "too few arguments!"
+		print usage
+		exit(1)
+	elif len(args) > 3:
+		print "too many arguments!"
+		print usage
+		exit(1)
+	else:
+		global realFile
+		global decoyFile
+		global outFile
+		realFile 		= args[0]
+		decoyFile 	= args[1]
+		if len(args) == 3:
+			outFile = args[2]
+
+if len(sys.argv) < 3:
+	print usage
+	exit(1)
+else:	
+	readArgs(sys.argv[1:])
+
 
 real = read_csv(realFile, sep="\t")
 decoy = read_csv(decoyFile, sep="\t")
 
 real['pscore'] = 1 - real.fragmentMarkovAllRatioProb
 decoy['pscore'] = 1 - decoy.fragmentMarkovAllRatioProb
+
 real = calculateQvalues(real, decoy)
 
-irtModel = findIRtModel(real, withoutExt(outFile))
+irtModel = findIRtModel(real, withoutExt(outFile), minPeps)
+
+if irtModel["n"] < minPeps:
+	print "ERROR: couldn't detect enough rt-peptides to create mapping. Only found %d of %d." % (irtModel["n"], minPeps) 
+	exit(1)
 
 if outFile == "":
 	print "rt peps w. fdr < 0.01", len(real[real['q-value'] < 0.01])
 	print "slope: ", irtModel['slope']
-	print "std: ", irtModel['std']
 	print "intercept: ", irtModel['intercept']
+	print "std: ", irtModel['std']
+	print "corr2: ", irtModel['corr2']
 else:
 	out = open(outFile, "w")
 	out.write("rt peps w. fdr < 0.01: %d\n" % len(real[real['q-value'] < 0.01]))
 	out.write("slope: %f\n" % irtModel['slope'])
 	out.write("intercept: %f\n" % irtModel['intercept'])
 	out.write("std: %f\n" % irtModel['std'])
+	out.write("corr2: %f\n" % irtModel['corr2'])
 	out.close()
 
 

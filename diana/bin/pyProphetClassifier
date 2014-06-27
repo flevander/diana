@@ -123,13 +123,15 @@ for k,v in conf.iteritems():
 
 args += " %s " % (pyProphIn)
 
+pyProphetPath = require(conf, 'PyProphetPath')
+
 if dryrun:
 	print "    DEBUG      "
 	print "   =======     "
 	print " wanted to run:"
 	print "pyprophet", args
 else:
-	os.system("/home/johant/bin/pyprophet/bin/pyprophet " + args)
+	os.system("%s "%pyProphetPath + args)
 	
 #	pyProphOutFile = "%s_raw_stat.xls" % withoutExt(realFile)
 #	dianaRun("csv2esv", "-f %s" % pyProphOutFile, False)
