@@ -9,7 +9,7 @@ object TraceBuilder {
 
 class TraceBuilder(val sizeIncrement: Double = 2.0) extends ArrayBuilder[Double] {
 
-	protected var elems: Array[Double] = _
+	protected var elems = new Array[Double](0)
 	protected var capacity: Int = 0
 	protected var size: Int = 0
 
