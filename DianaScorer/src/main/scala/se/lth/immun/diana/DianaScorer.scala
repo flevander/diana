@@ -76,6 +76,14 @@ object DianaScorer extends CLIApplication {
 	var cliBar		= new CLIBar(30, true)
 	//var singleResult 	= true
 	
+	var profiling 	= false
+	var chromReadTime 		= 0L
+	var tramlReadTime 		= 0L
+	var chromMapTime 		= 0L
+	var dianaMs1InputTime 	= 0L
+	var dianaMs2InputTime 	= 0L
+	var dianaAnalysisTime 	= 0L
+	
 	
 	//def MISSING:Seq[PCGroup] = { var pg = new PCGroup; pg.pvalue = 1.0; Array(pg) }
 	
@@ -96,6 +104,7 @@ object DianaScorer extends CLIApplication {
 				else
 					outFile = new File(swathFile.toString)
 			}
+			chromReadTime = System.currentTimeMillis
 		})
 		
     	arg("TRAML", s => {
@@ -118,6 +127,7 @@ object DianaScorer extends CLIApplication {
 				println(s)
 				throw new IllegalArgumentException(s)
 			}
+			tramlReadTime = System.currentTimeMillis
 		})
 		
 		opt("output", 
@@ -153,6 +163,12 @@ object DianaScorer extends CLIApplication {
 				"(default: not verbose)", 
 				s => {
 					quiet = false
+				})
+				
+		opt("cpu-profiling", 
+				"(default: no profiling)", 
+				s => {
+					profiling = true
 				})
 		
 				/*
@@ -213,10 +229,14 @@ object DianaScorer extends CLIApplication {
 		//	println("                => no decoy information, will skip FDR calculations")
     	println()
 		
-		var qvalues:Seq[(Double, Double)] = Nil
-    	var pcgroups = analyzeFile(swathFile, traml, false)
+		var pcgroups = analyzeFile(swathFile, traml, false)
     					.map(_.sortBy(_.pscore))
     					.sortBy(_.head.pscore)
+    	chromMapTime /= pcgroups.length
+    	dianaMs1InputTime /= pcgroups.length
+    	dianaMs2InputTime /= pcgroups.length
+    	dianaAnalysisTime /= pcgroups.length
+    	
     		/*
     	if (singleResult)
     		pcgroups = pcgroups.map(_.headOption.toSeq)
@@ -371,9 +391,35 @@ object DianaScorer extends CLIApplication {
 			ew.close
 		}
 		val after = System.currentTimeMillis
-		println("  time taken: "+(after-before)+"ms")
-		
+		if (!profiling)
+			println("  time taken: "+(after-before)+"ms")
+		else {
+			println("     total time: "+niceTiming(after-before))
+			println("chrom read time: "+niceTiming(chromReadTime))
+			println("traml read time: "+niceTiming(tramlReadTime))
+			println("  analysis time: "+niceTiming(analysisTime))
+			println(" out write time: "+niceTiming(after - analysisTime))
+			println()
+			println("-- average subtimes per peptide --")
+			println("           chrom map time: "+niceTiming(chromMapTime))
+			println("diana ms1 input calc time: "+niceTiming(dianaMs1InputTime))
+			println("diana ms2 input calc time: "+niceTiming(dianaMs2InputTime))
+			println("      diana analysis time: "+niceTiming(dianaAnalysisTime))
+		}
 		return
+	}
+	
+	
+	def niceTiming(t:Long) = {
+		val ms = t % 1000
+		var x = t / 1000
+		val s = x % 60
+		x = x / 60
+		val m = x & 60
+		x = x / 60
+		val h = x % 24
+		val d = x / 24
+		"%d days %02d:%02d:%02d.%ds".format(d, h, m, s, ms)
 	}
 	
 	
@@ -397,13 +443,26 @@ object DianaScorer extends CLIApplication {
 			print(cliBar.update(0))
 		}
 		
+		var lastTime = 0L
+		def t0 = lastTime = System.currentTimeMillis
+		def dt = {
+			val t = System.currentTimeMillis
+			val dt = t - lastTime
+			lastTime = t
+			dt
+		}
+		
 		assays.map(assay => {
+			
+			t0
 			if (quiet) {
 				aCount += 1
 				print(cliBar.update(aCount, nAssays))
 			}
 			val transChroms = assay.transitions.map(t => gmzML.chromatograms.find(_.id == t.id))
 			val targChroms = assay.targets.map(t => gmzML.chromatograms.find(_.id == t.id))
+			
+			chromMapTime += dt
 			
 			if (transChroms.count(_.isDefined) < 2) {
 				val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(assay.pepCompRef, assay.pepCompMz, mzmlFile.toString)
@@ -415,6 +474,8 @@ object DianaScorer extends CLIApplication {
 				
 				val dIn = DianaInput.fromTransitions(transChroms.map(_.get.toXChromatogram), assay)
 				
+				dianaMs2InputTime += dt
+				
 				val iDIn =
 					if (targChroms.nonEmpty)
 						Some(DianaInput.fromTargets(
@@ -423,7 +484,10 @@ object DianaScorer extends CLIApplication {
 							))
 					else None
 					
+				dianaMs1InputTime += dt
+				
 				val carriers = AnalyzeCG(dIn, iDIn, assay)
+				dianaAnalysisTime += dt
 				if (carriers.isEmpty) List(new DianaPeptideCandidate(assay))
 		        else carriers.map(c => DianaPeptideCandidate(assay, dIn.cg, iDIn.map(_.cg), c, pScoreFunc, carriers.length))
 		       /* 

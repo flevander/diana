@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>se.lth.immun</groupId>
   <artifactId>DianaScorer</artifactId>
-  <version>0.7.0</version>
+  <version>0.7.1</version>
   <inceptionYear>2012</inceptionYear>
   <properties>
     <scala.version>2.10.0</scala.version>

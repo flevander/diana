@@ -15,7 +15,7 @@
 # used decoys: false
 # swath file: RTpeptides.3iso.chrom.mzML
 # traml file: RTpeptides.3iso.traml
-# analysis time (ms): 5016
+# analysis time (ms): 4974
 #
 # COLUMN HEADERS
 #: rawArea	correctedArea	isotopeArea	rtProb	fragmentRankAllRatioProb	fragmentRankPcsRatioProb	fragmentMarkovAllRatioProb	fragmentMarkovPcsRatioProb	fragmentCorrScore	isotopeRankAllRatioProb	isotopeRankPcsRatioProb	isotopeMarkovAllRatioProb	isotopeMarkovPcsRatioProb	isotopeCorrScore	p-score	q-value	rtStart	rtApex	rtEnd	rtApexAssay	q1	charge	maxIntensity	estimateApex	alternatives	protein	peptideSequence
