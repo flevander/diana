@@ -25,6 +25,8 @@ import se.lth.immun.chem._
 import se.lth.immun.unimod.UniMod
 
 import ms.numpress.MSNumpress
+import se.lth.immun.collection.numpress.NumLinArray
+import se.lth.immun.collection.numpress.NumSlofArray
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ArrayBuilder
@@ -77,6 +79,10 @@ object Tracer extends CLIApplication {
 		override def toString = "%s|%.2f-%.2f".format(channel, id.q1, id.q3)
 	}
 	
+	case class ChromGroupIndex(traml:Int, channelGroup:Int, q1:Double) {
+		override def toString = "%s|%.2f".format(channelGroup, q1)
+	}
+	
 	
 	
 	
@@ -97,12 +103,12 @@ object Tracer extends CLIApplication {
 	var noBar					= false
 	var nd 					= new NormalDistribution
 
-	var transitionSets		= new ArrayBuffer[Seq[TimedChannelTrace[GhostTransition]]]
+	var transitionSets		= new ArrayBuffer[Seq[ChannelGroupTrace[Double, GhostTransition]]]
 	var isotopeSets			= new ArrayBuffer[Seq[ChannelTrace[Isotope]]]
-	var ms1Times:TraceBuilder = _
+	var ms1Times:AggrBuilder = _
 	//var specCounters		= new Array[Int](SWATHS_IN_FILE)
 	
-	var fragLookup:ChannelLookup[FragIndex] = _
+	var chromGroupLookup:ChannelLookup[ChromGroupIndex] = _
 	var allIsos:Seq[ChannelTrace[Isotope]] = _
 	
 	var subSampleMs1 		= 1
@@ -241,7 +247,7 @@ object Tracer extends CLIApplication {
 		x = x / 60
 		val h = x % 24
 		val d = x / 24
-		"%d days %02d:%02d:%02d.%ds".format(d, h, m, s, ms)
+		"%d days %02d:%02d:%02d.%03ds".format(d, h, m, s, ms)
 	}
 	
 	
@@ -296,7 +302,7 @@ object Tracer extends CLIApplication {
 			var dw = new MzMLDataWriters(
 							0,
 							ws => {},
-							transitionSets(j).length + isotopeSets(j).length,
+							transitionSets(j).map(_.subChannels.size).sum + isotopeSets(j).length,
 							writeChroms
 						)
 			
@@ -322,24 +328,26 @@ object Tracer extends CLIApplication {
     		specCounters(i) = -1
     	}*/
 		ms1Times =
-			if (subSampleMs1 == 1) 	TraceBuilder()
-			else					AggrTraceBuilder(subSampleMs1, true)
+			new AggrBuilder(new NumLinArray(10000.0, 20), subSampleMs1, true)
 		
 		val l = tramls.length
     	for (j <- 0 until l) {
     		val traml = tramls(j)
-    		transitionSets 	+= traml.transitions.map(t => new TimedChannelTrace(t))
+    		transitionSets 	+= 
+    			(for {
+	    			(q1, transes) <- traml.transitions.groupBy(_.q1).toSeq
+	    		} yield new ChannelGroupTrace(q1, transes))
     		isotopeSets 	+= traml.includes.map(gt => new ChannelTrace(toIso(gt), subSampleMs1))
 	    	//isotopeChromSets(j) = isotopeSets(j).map(_ => new Array[Double](specPerSwath))
 	    }
 		
-		val fragIndices = 
+		val chromGroupIndices = 
 			for {
 				(tset, i) <- transitionSets.zipWithIndex
-				(tct, j) <- tset.zipWithIndex
-			} yield FragIndex(i, j, tct.id)
+				(cgt, j) <- tset.zipWithIndex
+			} yield ChromGroupIndex(i, j, cgt.id)
 		
-		fragLookup = new ChannelLookup(fragIndices, _.id.q1)
+		chromGroupLookup = new ChannelLookup(chromGroupIndices, _.q1)
 		allIsos = isotopeSets.flatten.sortBy(_.id.q1)
 	}
 	
@@ -488,7 +496,10 @@ object Tracer extends CLIApplication {
 			
 			val q1windows 	= getQ1Windows(gs)
 			val t 			= gs.scanStartTime
-	    	val fragIndices	= fragLookup.fromRanges(q1windows).toSeq.sortBy(_.id.q3)
+	    	val cgIndices	= chromGroupLookup.fromRanges(q1windows).toSeq
+	    	val traces		= cgIndices.flatMap(cgi => 
+	    						transitionSets(cgi.traml)(cgi.channelGroup).subChannels
+	    					).sortBy(_._1.q3)
 			
 	    	//println(q1windows.mkString(" "))
 	    	//println(fragIndices.mkString(" "))
@@ -496,12 +507,16 @@ object Tracer extends CLIApplication {
 			var i 		= 0
 			var wstart 	= 0
 			var wend 	= 0
-			val il 		= fragIndices.length
+			val il 		= traces.length
 	
+			for (cgi <- cgIndices) {
+				transitionSets(cgi.traml)(cgi.channelGroup).time += t
+			}
+			
 			while (i < il) {
-				val trace = transitionSets(fragIndices(i).traml)(fragIndices(i).channel)
-				val q3 = trace.id.q3
-				if (i > 0 && q3 < fragIndices(i-1).id.q3)
+				val (gt, intensityTrace) = traces(i)
+				val q3 = gt.q3
+				if (i > 0 && q3 < traces(i-1)._1.q3)
 					throw new Exception("transitions not sorted by ascending q3")
 				val ppmCutoff = q3 / 1000000 * minDiffPPM
 				var intensity = 0.0
@@ -552,8 +567,7 @@ object Tracer extends CLIApplication {
 					}
 				}
 				
-				trace.intensity += intensity
-				trace.time += t
+				intensityTrace += intensity
 				i += 1
 			}
 		}
@@ -563,29 +577,38 @@ object Tracer extends CLIApplication {
 	def writeFragmentChrom(
 			w:XmlWriter,
 			index:Int,
-			ct:TimedChannelTrace[GhostTransition]
+			gt:GhostTransition,
+			times:NumLinArray,
+			intensities:NumSlofArray
 	) = {
-		var t = ct.id
-		var gc = new GhostChromatogram
-		gc.precursor 		= t.q1
-		gc.product 			= t.q3
-		gc.collisionEnergy 	= t.ce
-		gc.times 			= ct.time.nocopyResult
-		gc.intensities 		= ct.intensity.nocopyResult
-		gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
-								MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
-		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
-								MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
-		val chrom 	= gc.toChromatogram(index)
-		chrom.id 	= t.id
-		chrom.write(w, null)
+		val gc = new GhostChromatogram
+		gc.precursor 		= gt.q1
+		gc.product 			= gt.q3
+		gc.collisionEnergy 	= gt.ce
+		
+		val c = new Chromatogram
+		c.id = gt.id
+		c.index = index
+		c.defaultArrayLength = times.length
+		c.precursor = gc.chromatogram.precursor
+		c.product 	= gc.chromatogram.product
+		
+		c.binaryDataArrays += ToMzML.toBinaryDataArray(
+									times.ba, 
+									GhostBinaryDataArray.DataDef(true, false, 
+											MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false))
+		c.binaryDataArrays += ToMzML.toBinaryDataArray(
+									intensities.ba,
+									GhostBinaryDataArray.DataDef(true, false, 
+											MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false))
+		c.write(w, null)
 	}
 	
 	
 	def writeIsotopeChrom(
 			w:XmlWriter,
 			index:Int,
-			times:Seq[Double],
+			times:AggrBuilder,
 			ct:ChannelTrace[Isotope]
 	) = {
 		def occurenceParam(occ:Double) = {
@@ -596,37 +619,47 @@ object Tracer extends CLIApplication {
 			u
 		}
 		
-		var iso = ct.id
-		var gc = new GhostChromatogram
+		val iso = ct.id
+		val gc = new GhostChromatogram
 		gc.precursor 		= iso.q1
 		gc.product 			= 0.0
 		gc.collisionEnergy 	= 0.0
-		gc.chromatogram.userParams += occurenceParam(iso.occurence)
-		gc.times 			= times
-		gc.intensities 		= ct.intensity.nocopyResult
-		gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
-									MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
-		gc.intensityDef 	= GhostBinaryDataArray.DataDef(true, false, 
-									MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false)
-		val chrom 	= gc.toChromatogram(index)
-		chrom.id	= iso.id//"%s naturally %.2f%s @ %.3f".format(ct.id.seq, ct.id.occurence*100, "%", ct.id.q1)
-		chrom.write(w, null)
+		
+		val c = new Chromatogram
+		c.id = iso.id
+		c.index = index
+		c.defaultArrayLength = times.a.length
+		c.userParams += occurenceParam(iso.occurence)
+		c.precursor = gc.chromatogram.precursor
+		c.product 	= gc.chromatogram.product
+		
+		c.binaryDataArrays += ToMzML.toBinaryDataArray(
+									times.a.ba, 
+									GhostBinaryDataArray.DataDef(true, false, 
+											MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false))
+		c.binaryDataArrays += ToMzML.toBinaryDataArray(
+									ct.intensity.a.ba,
+									GhostBinaryDataArray.DataDef(true, false, 
+											MSNumpress.ACC_NUMPRESS_SLOF, GhostBinaryDataArray.Intensity(), false))
+		c.write(w, null)
 	}
 	
 	
 	def writeChroms(w:XmlWriter) = {
 		var index = 0
-		val tramlFragmentTraces = transitionSets(currTramlOut)
-		for (trace <- tramlFragmentTraces) {
-			writeFragmentChrom(w, index, trace)
+		val tramlChannelGroups = transitionSets(currTramlOut)
+		for {
+			cgt <- tramlChannelGroups
+			(gt, trace) <- cgt.subChannels
+		} {
+			writeFragmentChrom(w, index, gt, cgt.time, trace)
 			index += 1
 		}
 		
-		val _times = ms1Times.nocopyResult
 		val tramlIsotopeTraces = isotopeSets(currTramlOut)
 		if (ms1SpecCounter > 0) {
 			for (trace <- tramlIsotopeTraces) {
-				writeIsotopeChrom(w, index, _times, trace)
+				writeIsotopeChrom(w, index, ms1Times, trace)
 				index += 1
 			}
 		}

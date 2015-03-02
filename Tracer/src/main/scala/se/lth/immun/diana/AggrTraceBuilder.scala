@@ -47,5 +47,5 @@ class AggrTraceBuilder(val aggr: Int, val mean:Boolean = false, sizeIncrement: D
 			super.++=(xs)
 	}
 	
-	override def toString = "AggrChromBuilder"
+	override def toString = "AggrTraceBuilder"
 }

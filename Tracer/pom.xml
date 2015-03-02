@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>se.lth.immun</groupId>
   <artifactId>Tracer</artifactId>
-  <version>0.3.1</version>
+  <version>0.3.2</version>
   <inceptionYear>2014</inceptionYear>
   <properties>
     <scala.version>2.10.0</scala.version>
@@ -65,6 +65,11 @@
   		<groupId>se.lth.immun</groupId>
   		<artifactId>TraML</artifactId>
   		<version>1.1.0</version>
+  	</dependency>
+  	<dependency>
+  		<groupId>se.lth.immun</groupId>
+  		<artifactId>MsNumpressCollections</artifactId>
+  		<version>1.0.0</version>
   	</dependency>
   </dependencies>
   

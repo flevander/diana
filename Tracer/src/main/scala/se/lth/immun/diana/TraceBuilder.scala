@@ -69,5 +69,5 @@ class TraceBuilder(val sizeIncrement: Double = 2.0) extends ArrayBuilder[Double]
 		case _ => false
 	}
 
-	override def toString = "TraceBuilder"
+	override def toString = "TraceBuilder(n="+size+")"
 }
