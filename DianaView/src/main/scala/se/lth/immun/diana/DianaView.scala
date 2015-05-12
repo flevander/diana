@@ -1224,7 +1224,6 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 	
 	
 	
-	
 	def showRef(aIn:AnubisInput) = {
 		val xs = Array(-2.0, -1.0, 0.0, 1.0, 2.0)
 		var cs = aIn.refRatios.filter(_.transitionId1 == 0).map(r => {
