@@ -11,4 +11,5 @@ class DianaAssay(
 		val targets:Seq[GhostTarget]
 ) {
 
+	override def toString = pepCompRef + "-"+pepCompMz
 }
