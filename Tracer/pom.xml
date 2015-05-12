@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>se.lth.immun</groupId>
   <artifactId>Tracer</artifactId>
-  <version>0.3.2</version>
+  <version>0.3.3</version>
   <inceptionYear>2014</inceptionYear>
   <properties>
     <scala.version>2.10.0</scala.version>
@@ -57,8 +57,8 @@
   		<version>1.0.0</version>
   	</dependency>
   	<dependency>
-  		<groupId>se.lth.immun</groupId>
-  		<artifactId>App</artifactId>
+  		<groupId>se.jt</groupId>
+  		<artifactId>CLIApp</artifactId>
   		<version>1.0.0</version>
   	</dependency>
   	<dependency>
