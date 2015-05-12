@@ -2,20 +2,15 @@ package se.lth.immun.diana
 
 import se.lth.immun.xml.XmlReader
 import se.lth.immun.xml.XmlWriter
-import se.lth.immun.app.CLIApplication
-import se.lth.immun.app.CLIBar
-import se.lth.immun.app.CommandlineArgumentException
+import se.jt.CLIApp
 
 import java.io.File
 import java.io.FileReader
 import java.io.FileInputStream
 import java.io.BufferedReader
-import java.io.FileWriter
-import java.io.BufferedWriter
 import java.io.IOException
 import java.util.Properties
 import java.util.Date
-import java.util.Locale
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
@@ -24,12 +19,6 @@ import se.lth.immun.mzml._
 import se.lth.immun.mzml.ghost._
 import se.lth.immun.traml.ghost._
 
-//import se.lth.immun.anubis.Ratio
-//import se.lth.immun.anubis.AnubisInput
-//import se.lth.immun.anubis.ReferenceFile
-//import se.lth.immun.anubis.ReferencePrecursor
-//import se.lth.immun.anubis.ReferenceTransition
-//import se.lth.immun.anubis.AnubisParams
 import se.lth.immun.anubis.ResultFile
 import se.lth.immun.anubis.ResultParameter
 import se.lth.immun.anubis.ResultMzMLFile
@@ -43,93 +32,57 @@ import DianaPeakCandidate._
 
 import se.lth.immun.math.Ratios
 
-import se.lth.immun.esv._
 import se.lth.immun.chem._
 import se.lth.immun.unimod.UniMod
 
-object DianaScorer extends CLIApplication {
+import akka.actor.Actor
+import akka.actor.ActorRef
+import akka.actor.ActorSystem
+import akka.actor.Props
+import akka.actor.Inbox
+
+object DianaScorer extends CLIApp {
 
 	class Isotope(
 			val q1:Double,
 			val occurence:Double
 	) {}
-	
-	
-	// real
-	var swathFile:File 			= _
-	var tramlFile:File 			= _
-	var traml:GhostTraML		= _
-	//	var ref:ReferenceFile		= null
-	var swathGmzML:GhostMzML	= _
-	var outFile:File			= _
-	var outEsv					= true
-	var outXml					= false
-	
-	var noDecoys				= true
 
-	// swath analysis
-	var pScoreFunc:Carrier => Double = c => c.fragmentRankPcsRatioProb
-	var nIsotopes				= 0
-	
-	var quiet 		= true
-	var noBar		= false
-	var cliBar		= new CLIBar(30, true)
-	//var singleResult 	= true
-	
-	var profiling 	= false
-	var chromReadTime 		= 0L
-	var tramlReadTime 		= 0L
-	var chromMapTime 		= 0L
-	var dianaMs1InputTime 	= 0L
-	var dianaMs2InputTime 	= 0L
-	var dianaAnalysisTime 	= 0L
-	
-	
-	//def MISSING:Seq[PCGroup] = { var pg = new PCGroup; pg.pvalue = 1.0; Array(pg) }
-	
 	
 	def main(args:Array[String]):Unit = {
 		
 		var properties = new Properties
     	properties.load(this.getClass.getResourceAsStream("/pom.properties"))
+    	val name 		= properties.getProperty("pom.artifactId")
+    	val version 	= properties.getProperty("pom.version")
     	
-    	arg("SWATH_CHROM_MZML", s => {
-			swathFile = new File(s)
-			if (outFile == null) {
-				val comp = swathFile.toString.toLowerCase
-				if (comp.endsWith(".chrom.mzml")) 
-					outFile = new File(swathFile.toString.dropRight(11))
-				else if (comp.endsWith(".mzml"))
-					outFile = new File(swathFile.toString.dropRight(5))
-				else
-					outFile = new File(swathFile.toString)
-			}
-			chromReadTime = System.currentTimeMillis
-		})
+    	val params = new DianaScorerParams(name, version)
+    	
+		params.startTime 	= System.currentTimeMillis
+    	
+    	failOnError(parseArgs(name, version, args, params, List("swathChromMzML", "traml"), None))
+    	
+		println(name + " "+version)
+    	println("  swath mzML file: " + params.swathChromMzML.value)
+		println("       traML file: " + params.traml.value)
+		println()
+		println(" reading traml...")
 		
-    	arg("TRAML", s => {
-			tramlFile = new File(s)
-			val ext = s.split('.').last.toLowerCase
-			if (ext == "traml")
-				traml = GhostTraML.fromFile(new XmlReader(
-												new BufferedReader(new FileReader(tramlFile))
-											))
-			/*	ref = ReferenceFile.fromTraML(new XmlReader(
-												new BufferedReader(new FileReader(tramlFile))
-											))
-			else if (ext == "ref" || ext == "xml")
-				ref = ReferenceFile.fromFile(new XmlReader(
-												new BufferedReader(new FileReader(tramlFile))
-											))
-			*/
-			else {
-				val s = "Unkown traml extention '%s'. Need .traml".format(ext) //, .ref och .xml".format(ext)
-				println(s)
-				throw new IllegalArgumentException(s)
-			}
-			tramlReadTime = System.currentTimeMillis
-		})
 		
+    	fixDefaultOutputPath(params)
+    		
+    	val (traml, errs) = readTraml(params)
+		failOnError(errs)
+    	
+		import AnalysisActor._
+	
+    	val system = ActorSystem("diana-system")
+		val top = system.actorOf(Props(new TopActor(params)), "top-actor")
+    	top ! AnalyzeFile(traml, params)
+    	
+    	system.awaitTermination
+    	
+		/*
 		opt("output", 
 				"file where result should be saved (default: input chrom .xml/.esv)", 
 				s => {
@@ -144,9 +97,12 @@ object DianaScorer extends CLIApplication {
 				},
 				"X")
 		
-		/*opt("no-bar", 
-				"don't print process bar", 
-				s => noBar = true)
+		opt("concurrency", 
+				"the maximal amount of assays to compute in parallel (default: 1)", 
+				s => {
+					concurrency = s.toInt
+				},
+				"X")
 		
 		opt("edges", 
 				"edge find strategy to use: strict, L1 och L2 (default: strict)", 
@@ -158,7 +114,7 @@ object DianaScorer extends CLIApplication {
 					}
 				},
 				"strict|L1|L2")
-		*/
+		
 		opt("verbose", 
 				"(default: not verbose)", 
 				s => {
@@ -171,13 +127,6 @@ object DianaScorer extends CLIApplication {
 					profiling = true
 				})
 		
-				/*
-		opt("single-result", 
-				"report more than 1 peak per assay if good enough peaks exist (default: not used)", 
-				s => {
-					singleResult = false
-				})
-		*/
 		opt("no-esv", 
 				"flag if esv output it not wanted", 
 				s => {
@@ -190,25 +139,7 @@ object DianaScorer extends CLIApplication {
 					outXml = true
 				})
 		
-				/*
-		
-		opt("isotopes", 
-				"The number highest precursor isotopes to analyze (default 0)", 
-				s => nIsotopes = s.toInt, "X")
-		*/
-		
-		val before 		= System.currentTimeMillis
-    	val name 		= properties.getProperty("pom.name")
-    	val version 	= properties.getProperty("pom.version")
     	
-	/*
-	val f = new java.text.DecimalFormatSymbols(Locale.getDefault())
-	println("java dec sep: "+f.getDecimalSeparator)
-	println("scala float format:   %.3f %.3f".format(0.029, 23000.0))
-	println("scala science format: %.3e %.3e".format(0.029, 23000.0))
-	println("scala float format UK:   %.3f %.3f".formatLocal(Locale.UK, 0.029, 23000.0))
-	println("scala science format UK: %.3e %.3e".formatLocal(Locale.UK, 0.029, 23000.0))
-	*/
 		try {
 			parseArgs(name + " "+version, args)
 		} catch {
@@ -217,384 +148,50 @@ object DianaScorer extends CLIApplication {
 				return
 			}
 		}
-
+		 */
 					
-							
-		println(name + " "+version)
-    	println("  swath mzML file: " + swathFile)
-		println("       traML file: " + tramlFile)
-		println("         p cutoff: " + AnalyzeCG.pValueCutoff)
-    	println("     num isotopes: " + nIsotopes)
-		//if (noDecoys)
-		//	println("                => no decoy information, will skip FDR calculations")
-    	println()
-		
-		var pcgroups = analyzeFile(swathFile, traml, false)
-    					.map(_.sortBy(_.pscore))
-    					.sortBy(_.head.pscore)
-    	chromMapTime /= pcgroups.length
-    	dianaMs1InputTime /= pcgroups.length
-    	dianaMs2InputTime /= pcgroups.length
-    	dianaAnalysisTime /= pcgroups.length
     	
-    		/*
-    	if (singleResult)
-    		pcgroups = pcgroups.map(_.headOption.toSeq)
-		
-		*/
-		val analysisTime = System.currentTimeMillis - before
-		/*if (outXml) {
-			var res = new ResultFile(Array(),
-					Array(new ResultMzMLFile(swathFile, swathGmzML.runTime)))
-			
-			res.referenceFile = tramlFile
-			res.workingDir = new File(".")
-			
-			//println("Q1 pval qval area rt")
-			res.precursors = pcgroups.flatten.map(dpc => {
-				val assay = dpc.assay
-				
-				//println("%6.1f %10.4e %10.4e %10.0f %4.1f".format(rp.mz, spc.pvalue, spc.qvalue, spc.area, spc.rtApex))
-				new ResultPrecursor(
-					assay.transitions.head.q1,
-					rp.proteinName,
-					rp.peptideSequence,
-					Array(
-						new ResultReplicate(
-							spc.correctedArea,
-							0,
-							if (!spc.missing)
-								rp.measuredTransitions.zip(spc.correctedAreas).map(t => 
-									new ResultTransition(
-										t._1.mz,
-										t._1.ion,
-										t._2
-									)
-								).toArray
-							else 
-								rp.measuredTransitions.map(t => 
-									new ResultTransition(
-										t.mz,
-										t.ion,
-										0.0
-									)
-								).toArray,
-							new ResultRetentionTime(
-								spc.rtStart, spc.rtApex, spc.rtEnd
-							),
-							new ResultQuality(if (spc.missing) Double.NaN else if (noDecoys) (1-spc.pscore) else spc.qvalue)
-						)
-					)
-				)
-			}).toArray
-			
-			res.write(new XmlWriter(new BufferedWriter(new FileWriter(
-						new File(outFile.toString + ".xml")
-					))))
-		}
-		*/
-		if (outEsv) {
-			var esv = new Esv
-			esv.separator = '\t'
-			esv.escape = '"'
-			esv.nRows = Some(pcgroups.map(_.length).sum)
-				
-			esv.source = Some(name)
-			esv.version = Some(version)
-			
-			esv.addParameter("upper bound", AnalyzeCG.fragmentState.upperBound)
-			esv.addParameter("binSize", AnalyzeCG.fragmentState.binSize)
-			esv.addParameter("p-value cutoff", AnalyzeCG.pValueCutoff)
-			esv.addParameter("used decoys", !noDecoys)
-			//esv.addParameter("single result", singleResult)
-			esv.addParameter("swath file", swathFile)
-			esv.addParameter("traml file", tramlFile)
-			esv.addParameter("analysis time (ms)", analysisTime)
-			/*
-			if (decoySwathFile != null) {
-				esv.addParameter("decoy swath file", decoySwathFile)
-				esv.addParameter("decoy traml file", decoyTramlFile)
-			}
-			if (decoyEsvFile != null)
-				esv.addParameter("decoy esv file", decoyEsvFile)
-			 */
-			if (AnalyzeCG.fragmentState.rtMapUsed) {
-				esv.addParameter("rt map intercept", AnalyzeCG.fragmentState.rtIntersect)
-				esv.addParameter("rt map slope", AnalyzeCG.fragmentState.rtSlope)
-				esv.addParameter("rt map std", AnalyzeCG.fragmentState.rtStd)
-			}
-				
-			
-			esv.headers = Array("rawArea",
-								"correctedArea",
-								"isotopeArea",
-								"rtProb",
-								"fragmentRankAllRatioProb","fragmentRankPcsRatioProb","fragmentMarkovAllRatioProb","fragmentMarkovPcsRatioProb","fragmentCorrScore",
-								"isotopeRankAllRatioProb","isotopeRankPcsRatioProb","isotopeMarkovAllRatioProb","isotopeMarkovPcsRatioProb","isotopeCorrScore",
-								"p-score","q-value",
-								"rtStart","rtApex","rtEnd",
-								"rtApexAssay",
-								"q1","charge",
-								"maxIntensity", "estimateApex",
-								"alternatives",
-								"protein","peptideSequence")
-			esv.nColumns = Some(esv.headers.length)
-			
-			var bw = new BufferedWriter(new FileWriter(
-						new File(outFile.toString + ".esv")
-					))
-			var ew = new EsvWriter(esv, bw)
-			
-			val uk = Locale.UK
-			for (dpc <- pcgroups.flatten) {
-				val (pep, prot) = 
-					if (traml.peptides.contains(dpc.assay.pepCompRef)) {
-						val pep = traml.peptides(dpc.assay.pepCompRef)
-						(pep.sequence, pep.proteins.mkString)
-					} else {
-						(dpc.assay.pepCompRef, "-")
-					}
-				ew.write(List(
-						"%10.1f".formatLocal(uk, dpc.rawArea), 
-						"%10.1f".formatLocal(uk, dpc.correctedArea), 
-						"%10.1f".formatLocal(uk, dpc.isotopeArea), 
-						"%.2e".formatLocal(uk, dpc.rtProb), 
-						
-						"%.2e".formatLocal(uk, dpc.fragmentRankAllRatioProb), 
-						"%.2e".formatLocal(uk, dpc.fragmentRankPcsRatioProb), 
-						"%.2e".formatLocal(uk, dpc.fragmentMarkovAllRatioProb), 
-						"%.2e".formatLocal(uk, dpc.fragmentMarkovPcsRatioProb), 
-						"%.4f".formatLocal(uk, dpc.fragmentCorrScore), 
-						
-						"%.2e".formatLocal(uk, dpc.isotopeRankAllRatioProb),
-						"%.2e".formatLocal(uk, dpc.isotopeRankPcsRatioProb),
-						"%.2e".formatLocal(uk, dpc.isotopeMarkovAllRatioProb),
-						"%.2e".formatLocal(uk, dpc.isotopeMarkovPcsRatioProb),
-						"%.4f".formatLocal(uk, dpc.isotopeCorrScore), 
-						
-						"%.2e".formatLocal(uk, dpc.pscore), 
-						"%.2e".formatLocal(uk, dpc.qvalue), 
-						"%.1f".formatLocal(uk, dpc.rtStart), 
-						"%.1f".formatLocal(uk, dpc.rtApex), 
-						"%.1f".formatLocal(uk, dpc.rtEnd), 
-						"%5.1f".formatLocal(uk, dpc.assay.expectedRT),
-						"%.2f".formatLocal(uk, dpc.assay.transitions.head.q1),
-						dpc.assay.pepCompCharge,
-						"%.1f".formatLocal(uk, dpc.maxIntensity),
-						"%.1f".formatLocal(uk, dpc.maxEstimate),
-						dpc.alternatives,
-						pep, 
-						prot
-						))
-			}
-			
-			ew.close
-		}
-		val after = System.currentTimeMillis
-		if (!profiling)
-			println("  time taken: "+(after-before)+"ms")
-		else {
-			println("     total time: "+niceTiming(after-before))
-			println("chrom read time: "+niceTiming(chromReadTime))
-			println("traml read time: "+niceTiming(tramlReadTime))
-			println("  analysis time: "+niceTiming(analysisTime))
-			println(" out write time: "+niceTiming(after - analysisTime))
-			println()
-			println("-- average subtimes per peptide --")
-			println("           chrom map time: "+niceTiming(chromMapTime))
-			println("diana ms1 input calc time: "+niceTiming(dianaMs1InputTime))
-			println("diana ms2 input calc time: "+niceTiming(dianaMs2InputTime))
-			println("      diana analysis time: "+niceTiming(dianaAnalysisTime))
-		}
-		return
-	}
-	
-	
-	def niceTiming(t:Long) = {
-		val ms = t % 1000
-		var x = t / 1000
-		val s = x % 60
-		x = x / 60
-		val m = x & 60
-		x = x / 60
-		val h = x % 24
-		val d = x / 24
-		"%d days %02d:%02d:%02d.%ds".format(d, h, m, s, ms)
 	}
 	
 	
 	
-	def analyzeFile(
-			mzmlFile:File,
-			traml:GhostTraML,
-			decoy:Boolean
-	):Seq[Seq[DianaPeptideCandidate]] = {
-		val (reader, binFile, binFileChannel) = GhostMzML.getReaders(mzmlFile)
-		var gmzML = GhostMzML.fromFile(reader, true, binFileChannel)
-		swathGmzML = gmzML
-		
-		val assays = getAssays(traml)
-		
-		var aCount 	= 0
-		val nAssays 	= assays.length
-		cliBar.reset
-		if (quiet) {
-			println(cliBar.reference)
-			print(cliBar.update(0))
+	
+	def fixDefaultOutputPath(p:DianaScorerParams) = {
+		p.swathFile = new File(p.swathChromMzML)
+		if (p.outFile == null) {
+			val comp = p.swathFile.toString.toLowerCase
+			if (comp.endsWith(".chrom.mzml")) 
+				p.outFile = new File(p.swathFile.toString.dropRight(11))
+			else if (comp.endsWith(".mzml"))
+				p.outFile = new File(p.swathFile.toString.dropRight(5))
+			else
+				p.outFile = new File(p.swathFile.toString)
 		}
-		
-		var lastTime = 0L
-		def t0 = lastTime = System.currentTimeMillis
-		def dt = {
-			val t = System.currentTimeMillis
-			val dt = t - lastTime
-			lastTime = t
-			dt
-		}
-		
-		assays.map(assay => {
-			
-			t0
-			if (quiet) {
-				aCount += 1
-				print(cliBar.update(aCount, nAssays))
-			}
-			val transChroms = assay.transitions.map(t => gmzML.chromatograms.find(_.id == t.id))
-			val targChroms = assay.targets.map(t => gmzML.chromatograms.find(_.id == t.id))
-			
-			chromMapTime += dt
-			
-			if (transChroms.count(_.isDefined) < 2) {
-				val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(assay.pepCompRef, assay.pepCompMz, mzmlFile.toString)
-        		CLIApplication.log.write(errMsg)
-            	if (!quiet) 
-            		println(errMsg)
-            	List() //List(new DianaPeptideCandidate(pc))
-			} else {
-				
-				val dIn = DianaInput.fromTransitions(transChroms.map(_.get.toXChromatogram), assay)
-				
-				dianaMs2InputTime += dt
-				
-				val iDIn =
-					if (targChroms.nonEmpty)
-						Some(DianaInput.fromTargets(
-								targChroms.map(_.get.toXChromatogram), 
-								assay, dIn.cg.chromatograms.head.times
-							))
-					else None
-					
-				dianaMs1InputTime += dt
-				
-				val carriers = AnalyzeCG(dIn, iDIn, assay)
-				dianaAnalysisTime += dt
-				if (carriers.isEmpty) List(new DianaPeptideCandidate(assay))
-		        else carriers.map(c => DianaPeptideCandidate(assay, dIn.cg, iDIn.map(_.cg), c, pScoreFunc, carriers.length))
-		       /* 
-				try {
-		        	xmzML.grouper.extractGroup(pc.mz) match {
-		            	case Some(cg) => {
-		            		val aIn = AnubisInput.of(cg, pc, new AnubisParams)
-		            		
-		            		var iAIn =
-		            			if (nIsotopes > 1)
-		            				getIsotopeInput(xmzML, pc, aIn.cg.chromatograms.head.times)
-		            			else None
-		            		
-		            		val carriers = AnalyzeCG(aIn, iAIn, pc)
-		            		if (carriers.isEmpty) List(new DianaPeptideCandidate(pc))
-		            		else carriers.map(c => DianaPeptideCandidate(pc, aIn.cg, iAIn.map(_.cg), c, pScoreFunc, carriers.length))
-		            	}
-		            	case None => {
-		            		CLIApplication.log.write("%s %.3f not found in '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString))
-		            		List(new DianaPeptideCandidate(pc))
-		            	}
-		            }
-		        }
-		        catch {
-		        	case e:Exception => {
-		        		val errMsg = "ERROR during analysis of '%s %.3f' in file '%s'".format(pc.peptideSequence, pc.mz, mzmlFile.toString)
-		        		CLIApplication.log.write(errMsg)
-		            	CLIApplication.log.write(e)
-		            	if (!quiet) {
-		            		println(errMsg)
-		            		e.printStackTrace
-		            	}
-		        		List(new DianaPeptideCandidate(pc))
-		        	}
-		        }*/
-			}
-		})
 	}
 	
 	
 	
-	def getAssays(traml:GhostTraML):Seq[DianaAssay] = {
+	
+	def readTraml(p:DianaScorerParams):(GhostTraML, List[String]) = {
+		p.tramlFile = new File(p.traml)
+		val before = System.currentTimeMillis
+		val ext = p.traml.value.split('.').last.toLowerCase
+		val traml =
+			if (ext == "traml")
+				GhostTraML.fromFile(new XmlReader(
+											new BufferedReader(new FileReader(p.tramlFile))
+										))
+			else 
+				return (null, List("Unkown traml extention '%s'. Need .traml".format(ext)))
 		
-		val pcBuff = new HashMap[(String, Int), (Double, ArrayBuffer[GhostTransition], ArrayBuffer[GhostTarget])]
-		for (t <- traml.transitions) {
-			val z = 
-				if (t.q1z != 0) t.q1z
-				else if (traml.peptides.contains(t.peptideRef)) {
-					import PeptideParser._
-					val seq = traml.peptides(t.peptideRef).sequence
-					PeptideParser.parseSequence(seq) match {
-						case UniModPeptide(p) => math.round(p.monoisotopicMass() / t.q1).toInt
-						case Unparsable(seq) => 
-							val errMsg = "WARN: could parse peptide '%s' for mass calculation".format(seq)
-							CLIApplication.log.write(errMsg)
-							if (!quiet) 
-								println(errMsg)
-							0
-					}
-				} else {
-					val errMsg = "WARN: no charge given for compound '%s' with mz %.3f".format(t.compoundRef, t.q1)
-					CLIApplication.log.write(errMsg)
-					if (!quiet) 
-						println(errMsg)
-					0
-				}
-			val key = (if (t.peptideRef != null) t.peptideRef else t.compoundRef, z)
-			if (!pcBuff.contains(key))
-				pcBuff += key -> (t.q1, new ArrayBuffer, new ArrayBuffer)
-			pcBuff(key)._2 += t
-		}
-		for (t <- traml.includes) {
-			val z = 
-				if (t.q1z != 0) t.q1z
-				else if (traml.peptides.contains(t.peptideRef)) {
-					import PeptideParser._
-					val seq = traml.peptides(t.peptideRef).sequence
-					PeptideParser.parseSequence(seq) match {
-						case UniModPeptide(p) => math.round(p.monoisotopicMass() / t.q1).toInt
-						case Unparsable(seq) => 
-							val errMsg = "WARN: could parse peptide '%s' for mass calculation".format(seq)
-							CLIApplication.log.write(errMsg)
-							if (!quiet) 
-								println(errMsg)
-							0
-					}
-				} else {
-					val errMsg = "WARN: no charge given for compound '%s' with mz %.3f".format(t.compoundRef, t.q1)
-					CLIApplication.log.write(errMsg)
-					if (!quiet) 
-						println(errMsg)
-					0
-				}
-			val key = (if (t.peptideRef != null) t.peptideRef else t.compoundRef, z)
-			if (!pcBuff.contains(key))
-				pcBuff += key -> (t.q1, new ArrayBuffer, new ArrayBuffer)
-			pcBuff(key)._3 += t
-		}
-		
-		pcBuff.toSeq.map(kv => {
-			val ((ref, z), (tmz, trans, targs)) = kv
-			
-			
-			val expectedRT = trans.map(t => (t.rtEnd + t.rtStart)/2).sum / trans.length
-			new DianaAssay(ref, tmz, z, expectedRT, trans, targs)
-		})
+		p.tramlReadTime = System.currentTimeMillis - before
+		(traml, Nil)
 	}
+	
+	
+	
+	
+	
 	
 	
 	/*

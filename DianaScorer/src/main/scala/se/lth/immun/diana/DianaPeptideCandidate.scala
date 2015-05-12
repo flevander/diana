@@ -13,7 +13,6 @@ object DianaPeptideCandidate {
 			cg:XChromatogramGroup, 
 			icg:Option[XChromatogramGroup], 
 			c:Carrier,
-			pScoreFunc:Carrier => Double,
 			n:Int = 1
 	) = {
 		val x 		= new DianaPeptideCandidate(assay)
@@ -31,7 +30,6 @@ object DianaPeptideCandidate {
 		x.isotopeCorrScore			= c.isotopeCorrScore
 
 		x.rtProb				= c.rtProb
-		x.pscore 	= pScoreFunc(c)
 		x.correctedAreas 	= c.fragmentEstimation.areas
 		x.rawAreas 	= cg.chromatograms.map(_.intensities.slice(c.g.istart, c.g.iend).sum)
 		x.missing 	= false
@@ -82,7 +80,6 @@ class DianaPeptideCandidate(
 	var isotopeCorrScore	= 0.0
 	
 	var rtProb				= 0.0
-	var pscore 		= 1.0
 	var qvalue 		= -1.0
 	var correctedAreas 	= Seq[Double]()
 	var rawAreas 		= Seq[Double]()
