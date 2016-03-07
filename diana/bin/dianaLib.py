@@ -136,3 +136,5 @@ def dianaBin(cmd):
 def dianaRun(cmd, args, dryrun = True):
 	return execute(dianaBin(cmd), args, dryrun)
 
+def quote(x):
+	return "'%s'" % x
