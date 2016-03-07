@@ -139,11 +139,19 @@ merged.to_csv(
 	)
 
 args = ""
+pyProphetPath = None
+
 for k,v in conf.iteritems():
-	if v == "True":
+	if k.lower() == "pyprophetpath":
+		pyProphetPath = v
+	elif v == "True":
 		args += " --%s" % k
 	else:
 		args += " --%s=%s" % (k, v)
+
+if pyProphetPath is None:
+	print "No pyprophet path given, quitting...."
+	exit(1)
 
 args += " %s " % (pyProphIn)
 
@@ -153,10 +161,8 @@ if dryrun:
 	print " wanted to run:"
 	print "pyprophet", args
 else:
-	os.system("/home/johant/bin/pyprophet/bin/pyprophet " + args)
+	os.system(pyProphetPath + " " + args)
 	
 #	pyProphOutFile = "%s_raw_stat.xls" % withoutExt(realFile)
 #	dianaRun("csv2esv", "-f %s" % pyProphOutFile, False)
 #	dianaRun("esv", "clean %s.esv %s_q0.01.esv 'qvalue < 0.01'" % (pyProphOutFile, pyProphOutFile), False)
-
-																	
