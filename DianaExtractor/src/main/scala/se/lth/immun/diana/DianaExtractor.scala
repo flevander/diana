@@ -124,8 +124,10 @@ object DianaExtractor extends CLIApp {
 				
 		val t0 = System.currentTimeMillis
     	
-    	failOnError(parseArgs(name, version, args, params, List("mzML", "tramls"), Some("tramls")))
+    	failOnError(parseArgs(name, version, args, params, List("mzML"), Some("tramls")))
     	
+		
+		
 		if (!params.mzMLFile.exists)
 			failOnError(List("Input mzML file '%s' does not exists!".format(params.mzML.value)))
 			

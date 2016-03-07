@@ -32,11 +32,11 @@ class DianaExtractorParams extends Params {
 	trait MzThreshold { def cutoff(mz:Double):Double }
 	case class AbsoluteThreshold(diff:Double) extends MzThreshold { 
 		override def toString = diff+" Da" 
-		def cutoff(mz:Double) = mz / 1e6 * diff
+		def cutoff(mz:Double) = diff
 	}
 	case class PPMThreshold(diff:Double) extends MzThreshold {
 		override def toString = diff+" ppm"
-		def cutoff(mz:Double) = diff
+		def cutoff(mz:Double) = mz / 1e6 * diff
 	}
 	
 	lazy val mzThreshold =
