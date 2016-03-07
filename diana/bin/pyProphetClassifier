@@ -26,7 +26,11 @@ def setupDF(df, isDecoy, pCutoff=0.99):
 	fcs 	= df.fragmentCorrScore
 	fcs[fcs > 1.0] = 1.0
 	fcs[fcs < -1.0] = -1.0
-	df['var_area']		= np.log(df.area + 1.0)
+	if "area" in df.columns: 
+		df['var_area'] = np.log(df.area + 1.0)
+	elif "rawArea" in df.columns:
+		df['var_area'] = np.log(df.rawArea + 1.0)
+	
 	df['var_irtProb'] 		= df.irtProb
 	df['var_irtAbsDev'] = -df.irtDev.abs()
 	df['var_logRt'] 	= np.log(df.irtProb + 0.0000000001)
@@ -67,23 +71,35 @@ def setup(irtFile):
 
 
 
+dryrun = False
+usage = "usage:\n> pyProphetClassifier [--diana-dir=X] config.conf target.csv decoy.csv swathfile.irtmap"
 
+def readArgs(args):
+	if len(args) == 4:
+		global confPath
+		global realFile
+		global decoyFile
+		global irtMap
+		confPath 	= args[-4]
+		realFile 	= args[-3]
+		decoyFile 	= args[-2]
+		irtMap 		= args[-1]
+	elif args[0] == "-d":
+		global dryrun
+		dryrun = True
+		readArgs(args[1:])
+	elif args[0].lower().startswith("--diana-dir="):
+		readArgs(args[1:])
+		
 
 if len(sys.argv) < 5:
-	print "pyProphetClassifier config.conf target.csv decoy.csv swathfile.irtmap"
+	print usage
 	exit(1)
+else:	
+	readArgs(sys.argv[1:])
 
-if len(sys.argv) > 5:
-	dryrun = sys.argv[1] == "-d"
-else:
-	dryrun = False
 
-confPath 	= sys.argv[-4]
-realFile 	= sys.argv[-3]
-decoyFile 	= sys.argv[-2]
-irtMap		= sys.argv[-1]
 conf 		= readConf(confPath)
-
 shouldCalcIrtProb = False
 
 if dryrun:
@@ -105,13 +121,21 @@ project 	= base(realFile)
 if dryrun:
 	print real
 
+
+outputCols = ['transition_group_id', 'decoy', 
+			'main_var_FMPRP', 'var_irtProb', 'var_irtAbsDev', 'var_FCS', 'var_IMPRP', 'var_ICS', #'var_area', 
+			'rtApex', 'q1', 'charge', 'peptideSequence']
+
+if 'area' in merged.columns:
+	outputCols.append('area')
+else:
+	outputCols = outputCols + ['rawArea', 'correctedArea', 'isotopeArea']
+
 merged.to_csv(
 	pyProphIn, 
 	index=False, 
 	sep='\t',
-	cols=['transition_group_id', 'decoy', 
-			'main_var_FMPRP', 'var_irtProb', 'var_irtAbsDev', 'var_FCS', 'var_IMPRP', 'var_ICS', 'var_area', 
-			'rtApex', 'q1', 'charge', 'peptideSequence', 'area']
+	cols=outputCols 
 	)
 
 args = ""
@@ -123,15 +147,13 @@ for k,v in conf.iteritems():
 
 args += " %s " % (pyProphIn)
 
-pyProphetPath = require(conf, 'PyProphetPath')
-
 if dryrun:
 	print "    DEBUG      "
 	print "   =======     "
 	print " wanted to run:"
 	print "pyprophet", args
 else:
-	os.system("%s "%pyProphetPath + args)
+	os.system("/home/johant/bin/pyprophet/bin/pyprophet " + args)
 	
 #	pyProphOutFile = "%s_raw_stat.xls" % withoutExt(realFile)
 #	dianaRun("csv2esv", "-f %s" % pyProphOutFile, False)
