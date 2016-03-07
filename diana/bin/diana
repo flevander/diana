@@ -11,6 +11,8 @@ from dianaLib import *
 usage = """
 > diana [OPTIONS] CONF SWATH_LIST_FILE TARGET_ASSAY_LIST DECOY_ASSAY_LIST IRT_ASSAYS
 
+version 1.0.1
+
 CONF:
 a configuration file were each row has a key-value pair separated by a '=' char. 
 Whitespaces are ignored.

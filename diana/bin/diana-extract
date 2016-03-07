@@ -1,2 +1,2 @@
 #!/bin/bash 
-java -jar $DIANA_DIR/bin/jar/DianaExtractor-0.1.3-jar-with-dependencies.jar "$@"
+java -jar $DIANA_DIR/bin/jar/DianaExtractor-0.4.0-jar-with-dependencies.jar "$@"
