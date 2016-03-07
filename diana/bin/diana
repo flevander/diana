@@ -235,7 +235,7 @@ class FileAnalysis:
 				default(conf, 'DiaWindows', "gillet"), 
 				numIsotopes, self.fileDir, self.mzMLpath)
 		cmd = " ".join( assayLists )
-		if not self.dianaRunJar("DianaExtractor-0.3.0.jar", cmdArgs + cmd, dryrun):
+		if not self.dianaRunJar("DianaExtractor-0.4.0.jar", cmdArgs + cmd, dryrun):
 			return False
 		
 		for assays in assayLists:
