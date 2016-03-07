@@ -230,7 +230,7 @@ class FileAnalysis:
 	
 	
 	def extractAndScore(self, assayLists):
-		cmdArgs = "--ms-resolution=%s --mode=%s --dia-windows=%s --isotopes=%s --out-dir='%s' '%s' " % ( 
+		cmdArgs = "--msResolution=%s --mode=%s --diaWindows=%s --nIsotopes=%s --outDir='%s' '%s' " % ( 
 				require(conf, 'ExtractResolution'), require(conf, 'ExtractMode'),
 				default(conf, 'DiaWindows', "gillet"), 
 				numIsotopes, self.fileDir, self.mzMLpath)
