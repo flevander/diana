@@ -47,23 +47,23 @@ object DianaExtractor extends CLIApp {
 	}
 	
 	object SOFTWARE extends Software {
-		id = "SWATHExtractor"
-		version = "0.2.3-SNAPSHOT"
+		id = "DianaExtractor"
+		version = "0.4.1"
 	}
 	
 	object DATA_PROCESSING extends DataProcessing {
 		
-		var cv = new se.lth.immun.mzml.CvParam
+		val cv = new se.lth.immun.mzml.CvParam
 		cv.cvRef 		= "MS"
 		cv.accession 	= "MS:1000035"
 		cv.name 		= "chromatogram extraction"
 		
-		var pm = new ProcessingMethod
+		val pm = new ProcessingMethod
 		pm.order = 1
 		pm.softwareRef = SOFTWARE.id
 		pm.cvParams += cv
 		
-		id = "SWATHExtraction"
+		id = "DianaExtraction"
 		processingMethods += pm
 	}
 	
@@ -94,12 +94,11 @@ object DianaExtractor extends CLIApp {
 
 	var transitionSets		= new ArrayBuffer[TransitionPartitioning]
 	var isotopeSets			= new ArrayBuffer[Seq[ChromExtract[Isotope]]]
-	//var isotopeChromSets	= new ArrayBuffer[Array[Array[Double]]]
 	var times 				= new Array[Array[Double]](SWATHS_IN_FILE)
 	var ms1Times:ChromBuilder = _
-	//var specCounters		= new Array[Int](SWATHS_IN_FILE)
 	
 	var ms1SpecCounter		= -1
+	var lastScanTime 		= 0.0
 	var capacitiesFixed		= false
 	var capFixPercent		= 0.1
 	
@@ -114,7 +113,7 @@ object DianaExtractor extends CLIApp {
 	def isIMzML(f:File) 	= f.getName.toLowerCase.endsWith(".imzml")
 	def toIBD(f:File)		= new File(f.getAbsolutePath().dropRight(5) + "ibd")
 	
-	var properties = new Properties
+	val properties = new Properties
 	properties.load(this.getClass.getResourceAsStream("/pom.properties"))
 	val name 		= properties.getProperty("pom.name")
 	val version 	= properties.getProperty("pom.version")
@@ -167,12 +166,14 @@ object DianaExtractor extends CLIApp {
 	}
 	
 	
-	def parseDiaWindows(s:String) = 
-		if (Array("gillet", "snoop").contains(s)) {
-			if (s == "gillet") 		getQ1Window = gilletQ1Window _
-			else if (s == "snoop") 	getQ1Window = snoopQ1Window _
-		} else 
-			throw new Exception("Unknown dia window mode '"+s+"'")
+	def parseDiaWindows(
+			s:String
+	):GhostSpectrum => TransitionPartitioning.Q1Window = 
+		s match {
+			case "gillet"	=> gilletQ1Window _
+			case "snoop" 	=> snoopQ1Window _
+			case x => throw new Exception("Unknown dia window mode '"+x+"'")
+		}
 		
 	def parseMode(s:String) =
 		s match {
@@ -193,6 +194,8 @@ object DianaExtractor extends CLIApp {
 				nc => {},
 				c => {})
 		
+		getQ1Window = parseDiaWindows(params.diaWindows)
+		mode = parseMode(params.mode)
 		
 		println("HANDLING FILE "+swathFile)
 		val binaryFileChannel = 
@@ -209,6 +212,15 @@ object DianaExtractor extends CLIApp {
 		println(" heap size before writing: "+(runtime.totalMemory / 1000000) + " / "+(runtime.maxMemory / 1000000) + " Mb")
 		println()
 		
+		mzML.fileDescription.fileContent = CHROM_FILE_CONTENT
+		mzML.softwares += SOFTWARE
+		mzML.dataProcessings += DATA_PROCESSING
+		mzML.run.chromatogramList = Some({
+			val cl = new ChromatogramList
+			cl.defaultDataProcessingRef = DATA_PROCESSING.id
+			cl
+		})
+		
 		for (j <- 0 until tramls.length) {
 			currTramlOut = j
 			var tramlFile = params.tramlFiles(j)
@@ -224,10 +236,6 @@ object DianaExtractor extends CLIApp {
 			
 			
 			println(" writing output file: "+outFile)
-			
-			mzML.fileDescription.fileContent = CHROM_FILE_CONTENT
-			mzML.softwares += SOFTWARE
-			mzML.dataProcessings += DATA_PROCESSING
 				
 			out = XmlWriter(outFile, false)
 			var dw = new MzMLDataWriters(
@@ -312,7 +320,7 @@ object DianaExtractor extends CLIApp {
 	
 	
 	def handleSpectrum(s:Spectrum):Unit = {
-		var gs = GhostSpectrum.fromSpectrum(s)
+		val gs = GhostSpectrum.fromSpectrum(s)
 		
 		specCount += 1
 		if (params.makeBar) {
@@ -345,12 +353,19 @@ object DianaExtractor extends CLIApp {
 		
 		val mzs 			= gs.mzs
 		val intensities 	= gs.intensities
+		val t				= gs.scanStartTime
+		
+		if (t < lastScanTime)
+			throw new Exception("Scans in mzML are not ordered by scanTime! Cannot guarantee correctness.")
+		else
+			lastScanTime = t
+		
 		val wl = mzs.length
 				
 		gs.msLevel match {
 			case GhostSpectrum.MS1 =>
 				ms1SpecCounter += 1
-				ms1Times += gs.scanStartTime
+				ms1Times += t
 				
 				for (i <- 0 until isotopeSets.length) {
 					val isotopes 	= isotopeSets(i)
@@ -423,7 +438,6 @@ object DianaExtractor extends CLIApp {
 				
 				val q1window = getQ1Window(gs)
 				
-				val t = gs.scanStartTime
 		    	for (j <- 0 until tramls.length) {
 					val extracts 	= transitionSets(j).getTransitions(q1window)
 					extracts.times += t
@@ -497,7 +511,7 @@ object DianaExtractor extends CLIApp {
 	def writeFragmentChrom(
 			w:XmlWriter,
 			index:Int,
-			pe:TransitionPartitioning.PartitionExtract, 
+			pes:Iterable[TransitionPartitioning.PartitionExtract], 
 			ce:ChromExtract[GhostTransition]
 	) = {
 		var t = ce.id
@@ -506,7 +520,7 @@ object DianaExtractor extends CLIApp {
 		gc.product 			= t.q3
 		for (ce <- t.ce)
 			gc.collisionEnergy 	= ce
-		gc.times 			= pe.times.nocopyResult
+		gc.times 			= pes.flatMap(_.times.nocopyResult).toArray.sorted
 		gc.intensities 		= ce.chrom.nocopyResult
 		gc.timeDef 			= GhostBinaryDataArray.DataDef(true, false, 
 								MSNumpress.ACC_NUMPRESS_LINEAR, GhostBinaryDataArray.Time(), false)
@@ -557,13 +571,18 @@ object DianaExtractor extends CLIApp {
 	def writeChroms(w:XmlWriter):Seq[MzML.OffsetRef] = {
 		var index = 0
 		val tramlChromSet = transitionSets(currTramlOut)
-		val fragChromOffsets = 
+		val chromPartPairs = 
 			for {
 				partitionExtract <- tramlChromSet.parts.values
 				chromExtract <- partitionExtract.chroms
+			} yield (chromExtract, partitionExtract)
+			
+		val fragChromOffsets = 
+			for {
+				(chromExtract, groupedChromPartPairs) <- chromPartPairs.groupBy(_._1)
 			} yield {
 				val offsetRef = MzML.OffsetRef(chromExtract.id.id, w.byteOffset, None, None)
-				writeFragmentChrom(w, index, partitionExtract, chromExtract)
+				writeFragmentChrom(w, index, groupedChromPartPairs.map(_._2), chromExtract)
 				index += 1
 				offsetRef
 			}
