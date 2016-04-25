@@ -237,7 +237,7 @@ class FileAnalysis:
 		if default(conf, "ForceMzML", "false").lower() == "true":
 			cmdArgs = cmdArgs + "--force "
 		cmd = " ".join( assayLists )
-		if not self.dianaRunJar("DianaExtractor-0.4.0.jar", cmdArgs + cmd, dryrun):
+		if not self.dianaRunJar("DianaExtractor-0.4.2.jar", cmdArgs + cmd, dryrun):
 			return False
 		
 		for assays in assayLists:
