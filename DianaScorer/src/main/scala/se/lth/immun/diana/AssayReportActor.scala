@@ -49,7 +49,7 @@ class AssayReportActor(params:DianaScorerParams) extends Actor {
 			
 			g.dispose
 			try { 
-			    ImageIO.write(image, "png", new File("qc/"+da.pepCompRef+".png")) 
+			    ImageIO.write(image, "png", new File("qc/"+da.pepCompRef.replace("/","z").replace(':','_')+".png")) 
 			} catch {
 				case ioe:IOException =>
 			    	ioe.printStackTrace

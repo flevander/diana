@@ -1,2 +1,2 @@
 #!/bin/bash 
-java -jar ${DIANA_DIR}/bin/jar/EsvCLI-0.0.1-SNAPSHOT-jar-with-dependencies.jar "$@"
+java -jar ${DIANA_DIR}/bin/jar/EsvCLI-1.0.1.jar "$@"

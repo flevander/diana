@@ -223,8 +223,8 @@ class FileAnalysis:
 		assayBase = base(assays)
 		chroms = os.path.join(self.fileDir, "%s.chrom.mzML" % assayBase)
 		result = os.path.join(self.fileDir, assayBase)
-		cmd = "--no-xml --isotopes=%s --output='%s' '%s' '%s'" % (
-				numIsotopes, result, chroms, assays)
+		cmd = "--output='%s' '%s' '%s'" % (
+				result, chroms, assays)
 		return self.dianaRun("diana-score", cmd, dryrun)
 	
 	
@@ -244,8 +244,8 @@ class FileAnalysis:
 			assayBase = base(assays)
 			chroms = os.path.join(self.fileDir, "%s.chrom.mzML" % assayBase)
 			result = os.path.join(self.fileDir, assayBase)
-			cmd = "--no-xml --isotopes=%s --output='%s' '%s' '%s'" % (
-					numIsotopes, result, chroms, assays)
+			cmd = "--output='%s' '%s' '%s'" % (
+					result, chroms, assays)
 			if not self.dianaRunJar("DianaScorer-0.8.2.jar", cmd, dryrun):
 				return False
 		

@@ -4,7 +4,7 @@ You are now viewing the README file for DIANA, Data Independent Acquisition NA.
 
 REQUIREMENTS:
 
-java runtime 1.6
+java runtime 1.8
 
 python 2.7
 	python lib pandas
