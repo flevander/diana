@@ -5,7 +5,7 @@
   <version>0.8.2</version>
   <inceptionYear>2012</inceptionYear>
   <properties>
-    <scala.version>2.10.0</scala.version>
+    <scala.version>2.10.3</scala.version>
     <short.name>diana-score</short.name>
     <mainClass>se.lth.immun.diana.DianaScorer</mainClass>
     <script.file>target/${short.name}</script.file>
@@ -26,20 +26,20 @@
     </dependency>
     <dependency>
     	<groupId>org.scalatest</groupId>
-    	<artifactId>scalatest_${scala.version}</artifactId>
-    	<version>2.0.M5</version>
+    	<artifactId>scalatest_2.10</artifactId>
+    	<version>2.1.7</version>
     	<scope>test</scope>
     </dependency>
 
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>MzML</artifactId>
-  		<version>1.2.3</version>
+  		<version>1.3.1</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>Xml</artifactId>
-  		<version>1.0.0</version>
+  		<version>1.2.1</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
@@ -49,7 +49,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>AnubisLib</artifactId>
-  		<version>1.2.16</version>
+  		<version>1.4.1</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
@@ -59,7 +59,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>AnubisResultFile</artifactId>
-  		<version>1.3.2</version>
+  		<version>1.3.4</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
@@ -74,7 +74,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>UniMod</artifactId>
-  		<version>1.0.0</version>
+  		<version>1.3.3</version>
   	</dependency>
   	<dependency>
   		<groupId>se.lth.immun</groupId>
@@ -84,7 +84,7 @@
   	<dependency>
   		<groupId>se.lth.immun</groupId>
   		<artifactId>Signal</artifactId>
-  		<version>1.0.0</version>
+  		<version>1.0.1</version>
   	</dependency>
     <dependency>
     	<groupId>com.typesafe.akka</groupId>
@@ -92,9 +92,9 @@
     	<version>2.3.9</version>
     </dependency>
     <dependency>
-    	<groupId>se.jt</groupId>
+    	<groupId>se.johanteleman</groupId>
     	<artifactId>CLIApp</artifactId>
-    	<version>1.0.0</version>
+    	<version>1.2.0</version>
     </dependency>
     <dependency>
     	<groupId>se.lth.immun</groupId>

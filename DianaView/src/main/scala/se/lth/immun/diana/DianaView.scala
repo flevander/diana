@@ -71,7 +71,7 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 	) {}
 	
 	import WaveletFilter.Type._
-	import SwathPeakCandidate._
+	import DianaPeakCandidate._
 	
 	
 	// anubis
@@ -152,14 +152,14 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 	//var pcFinder:DerivatePCFinder = new DerivatePCFinder(1.5, 20)
 
 	var pValueCutoff 	= 0.99
-	val signalP 		= SwathSignalProcessor.getDefault
+	val signalP 		= DianaSignalProcessor.getDefault
 	
-	val fragmentState 		= new SwathChromatogramState(1.5)
-	val fragmentEvaluator 	= new SwathPCEvaluator(fragmentState)
+	val fragmentState 		= new DianaChromatogramState(1.5)
+	val fragmentEvaluator 	= new DianaPCEvaluator(fragmentState)
 	var findEdges			= fragmentEvaluator.findEdges _
 	
-	val isotopeState 		= new SwathChromatogramState(1.5)
-	val isotopeEvaluator 	= new SwathPCEvaluator(isotopeState)
+	val isotopeState 		= new DianaChromatogramState(1.5)
+	val isotopeEvaluator 	= new DianaPCEvaluator(isotopeState)
 	var nIsotopes	= 0
 	var manualResultFile:File 		= null
 	var manualResultEsv:EsvReader 	= null
@@ -341,7 +341,7 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 			)
 		
 		try {
-			parseArgs("SwathView", args)
+			parseArgs("DianaView", args)
 		} catch {
 			case e:CommandlineArgumentException => 
 				return
@@ -371,7 +371,7 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 	
 	def top = {
 		mainFrame = new MainFrame {
-			title = "SwathView - " + mzMLFile
+			title = "DianaView - " + mzMLFile
 			
 			contents = new BorderPanel {
 				focusable = true
@@ -960,7 +960,7 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 							new Curve2(ddyt, ddy, missing, "ddy", Color.PINK)
 					))
 					
-			var pcs = SwathPeakCandidate.findPCs(y, dy, ddy, baseline2, binSize)
+			var pcs = DianaPeakCandidate.findPCs(y, dy, ddy, baseline2, binSize)
 			for (pc <- pcs)
 				denoiseGraph.addAnnotation(
 						new HeightBoxAnnotation(
@@ -1002,16 +1002,16 @@ object DianaView extends SimpleSwingApplication with CLIApplication {
 				)
 		
 		
-		def getPCs(y:SwathSignalProcessor.SmoothAndBase) = {	
+		def getPCs(y:DianaSignalProcessor.SmoothAndBase) = {	
 			var dy 		= signalP.getDerivate(y.smooth)
 			var ddy		= signalP.getDerivate(dy)
 			
-			SwathPeakCandidate.findPCs(y.smooth, dy, ddy, y.base)
+			DianaPeakCandidate.findPCs(y.smooth, dy, ddy, y.base)
 		}
 		
 		var smooths		= allChroms.map(xc => signalP.getSmoothAndBase(xc.intensities.toArray))
 		var pcs 		= smooths.map(xc => getPCs(xc))
-		var carriers 	= SwathPeakCandidate.groupPCs(pcs, findEdges)
+		var carriers 	= DianaPeakCandidate.groupPCs(pcs, findEdges)
 							.map(g => new Carrier(pc, g, fChroms.length, iChroms.length))
 							.filter(_.fragmentPcs.length > 0)
 		

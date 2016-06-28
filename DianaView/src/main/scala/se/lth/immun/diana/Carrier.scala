@@ -1,7 +1,7 @@
 package se.lth.immun.diana
 
 import se.lth.immun.anubis.ReferencePrecursor
-import SwathPeakCandidate._
+import se.lth.immun.diana.DianaPeakCandidate._
 
 class Carrier(
 		var rpc:ReferencePrecursor,

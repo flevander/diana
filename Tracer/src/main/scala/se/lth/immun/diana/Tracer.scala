@@ -215,11 +215,11 @@ object Tracer extends CLIApp {
 			mzML.fileDescription.fileContent = CHROM_FILE_CONTENT
 			mzML.softwares += SOFTWARE
 			mzML.dataProcessings += DATA_PROCESSING
-				
-			val out = new XmlWriter(new BufferedWriter(new FileWriter(outFile)))
+			
+			val out = XmlWriter.apply(outFile, false, 4096)
 			var dw = new MzMLDataWriters(
 							0,
-							ws => {},
+							ws => {Nil},
 							transitionSets(j).map(_.subChannels.size).sum + isotopeSets(j).length,
 							writeChroms(j)
 						)
@@ -573,7 +573,7 @@ object Tracer extends CLIApp {
 	
 	
 	
-	def writeChroms(currTramlOut:Int)(w:XmlWriter) = {
+	def writeChroms(currTramlOut:Int)(w:XmlWriter):Seq[OffsetRef] = {
 		var index = 0
 		val tramlChannelGroups = transitionSets(currTramlOut)
 		for {
@@ -591,15 +591,16 @@ object Tracer extends CLIApp {
 				index += 1
 			}
 		}
+		return Nil
 	}
 	
 	
 	
-	
+	/**
 	def gilletQ1Window(gs:GhostSpectrum) = {
 		val swathIndex = math.floor((gs.q1 - 400) / 25).toInt
 		List(ChannelLookup.Range(400 + swathIndex*25, 425 + swathIndex*25))
-	}
+	}*/
 	
 	def snoopQ1Windows(gs:GhostSpectrum) = {
 		gs.spectrum.precursors.map(pc => {
