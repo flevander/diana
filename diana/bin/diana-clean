@@ -1,0 +1,9 @@
+#!/bin/bash
+
+IN_CSV="$1"
+IN_ESV="${IN_CSV%.*}.esv"
+csv2esv "$IN_CSV"
+esv clean "$IN_ESV" rank1.esv 'decoy == False' 'peak_group_rank == 1'
+esv2csv rank1.esv
+rm "$IN_ESV" rank1.esv
+mv rank1.csv "${IN_CSV%.*}.rank1.csv"
